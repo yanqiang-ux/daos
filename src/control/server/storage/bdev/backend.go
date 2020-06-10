@@ -186,7 +186,8 @@ func getController(pciAddr string, bcs []spdk.Controller) (*storage.NvmeControll
 	}
 
 	if spdkController == nil {
-		return nil, FaultPCIAddrNotFound(pciAddr)
+		return nil, errors.Errorf("%q not in %v", pciAddr, bcs)
+		// return nil, FaultPCIAddrNotFound(pciAddr)
 	}
 
 	scs, err := convertControllers([]spdk.Controller{*spdkController})

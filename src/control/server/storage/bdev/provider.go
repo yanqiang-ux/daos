@@ -137,8 +137,7 @@ func (p *Provider) Init(req InitRequest) error {
 // Scan attempts to perform a scan to discover NVMe components in the system.
 func (p *Provider) Scan(req ScanRequest) (*ScanResponse, error) {
 	if p.shouldForward(req) {
-		// TODO: figure out reason for forwarding request
-		//return p.fwd.Scan(req)
+		return p.fwd.Scan(req)
 	}
 
 	cs, err := p.backend.Scan()
