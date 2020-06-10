@@ -60,6 +60,7 @@ struct ds_pool {
 
 struct ds_pool *ds_pool_lookup(const uuid_t uuid);
 void ds_pool_put(struct ds_pool *pool);
+void ds_pool_get(struct ds_pool *pool);
 
 /*
  * Pool handle object
@@ -96,7 +97,7 @@ struct ds_pool_child {
 
 	/* The current maxim rebuild epoch, (0 if there is no rebuild), so
 	 * vos aggregation can not cross this epoch during rebuild to avoid
-	 * interferring rebuild process.
+	 * interfering rebuild process.
 	 */
 	uint64_t	spc_rebuild_fence;
 
@@ -218,12 +219,18 @@ int ds_pool_get_failed_tgt_idx(const uuid_t pool_uuid, int **failed_tgts,
 int ds_pool_svc_list_cont(uuid_t uuid, d_rank_list_t *ranks,
 			  struct daos_pool_cont_info **containers,
 			  uint64_t *ncontainers);
+
+int ds_pool_svc_check_evict(uuid_t pool_uuid, d_rank_list_t *ranks,
+			    uint32_t force);
 void
 ds_pool_disable_evict(void);
 void
 ds_pool_enable_evict(void);
 
-int ds_pool_svc_check_evict(uuid_t pool_uuid, d_rank_list_t *ranks,
-			    uint32_t force);
+int dsc_pool_open(uuid_t pool_uuid, uuid_t pool_hdl_uuid,
+		       unsigned int flags, const char *grp,
+		       struct pool_map *map, d_rank_list_t *svc_list,
+		       daos_handle_t *ph);
+int dsc_pool_close(daos_handle_t ph);
 
 #endif /* __DAOS_SRV_POOL_H__ */

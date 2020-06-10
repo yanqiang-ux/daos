@@ -224,7 +224,7 @@ class LogLine():
     def _is_type(self, text, trace=True):
         """Checks for text in a log message
 
-        Retuns True if the line starts with the text provided
+        Returns True if the line starts with the text provided
         """
         if trace and not self.trace:
             return False
@@ -279,6 +279,12 @@ class LogLine():
         """Returns True if line is Link descriptor"""
 
         return self._is_type(['Link'])
+
+    def is_fi_site(self):
+        return self._is_type(['fault_id'], trace=False)
+
+    def is_fi_alloc_fail(self):
+        return self._is_type(['out', 'of', 'memory'], trace=False)
 
     def is_calloc(self):
         """Returns True if line is a allocation point"""

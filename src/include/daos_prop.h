@@ -21,7 +21,7 @@
  * portions thereof marked with this legend must also reproduce the markings.
  */
 /**
- * DAOS pool/container intialization properties
+ * DAOS pool/container initialization properties
  */
 
 #ifndef __DAOS_PROP_H__
@@ -273,6 +273,15 @@ typedef struct {
  */
 daos_prop_t *
 daos_prop_alloc(uint32_t entries_nr);
+
+/**
+ * Free the DAOS property entries.
+ *
+ * \param[in]	prop	property entries to be freed.
+ */
+void
+daos_prop_entries_free(daos_prop_t *prop);
+
 
 /**
  * Free the DAOS properties.

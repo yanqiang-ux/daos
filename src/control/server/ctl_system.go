@@ -45,30 +45,44 @@ type systemRanksFunc func(context.Context, control.UnaryInvoker, *control.RanksR
 type ranksMethod string
 
 const (
-	stop  ranksMethod = "stop"
 	prep  ranksMethod = "prep shutdown"
+	stop  ranksMethod = "stop"
+	reset ranksMethod = "reset format"
 	start ranksMethod = "start"
 	ping  ranksMethod = "ping"
 )
 
-func getRanksFunc(method ranksMethod) systemRanksFunc {
-	switch method {
-	case stop:
-		return control.StopRanks
+// Call performs gRPC fan-out calling control API function looked up based on
+// the receiver ranksMethod.
+func (rm ranksMethod) Call(ctx context.Context, invoker control.Invoker, req *control.RanksReq) (*control.RanksResp, error) {
+	var fn systemRanksFunc
+
+	switch rm {
 	case prep:
-		return control.PrepShutdownRanks
+		fn = control.PrepShutdownRanks
+	case stop:
+		fn = control.StopRanks
+	case reset:
+		fn = control.ResetFormatRanks
 	case start:
-		return control.StartRanks
+		fn = control.StartRanks
 	case ping:
-		return control.PingRanks
+		fn = control.PingRanks
 	default:
-		panic(1) // shouldn't happen
+		return nil, errors.New("unrecognised system ranks method") // programming error
 	}
+
+	return fn(ctx, invoker, req)
 }
 
-// rpcToRanks sends requests to ranks in list on their respective host
+// rpcFanout sends requests to ranks in list on their respective host
 // addresses through functions implementing UnaryInvoker.
-func (svc *ControlService) rpcToRanks(ctx context.Context, req *control.RanksReq, method ranksMethod) (system.MemberResults, error) {
+//
+// The fan-out host list is derived from the provided rank list and contains
+// any host that is managing a rank selected by the request rank list filter.
+//
+// Fan-out is invoked by control API *Ranks functions.
+func (svc *ControlService) rpcFanout(ctx context.Context, req *control.RanksReq, method ranksMethod) (system.MemberResults, error) {
 	if svc.membership == nil {
 		return nil, errors.New("nil system membership")
 	}
@@ -80,8 +94,7 @@ func (svc *ControlService) rpcToRanks(ctx context.Context, req *control.RanksReq
 	}
 
 	req.SetHostList(svc.membership.Hosts(req.Ranks...))
-	svc.log.Debugf("host list %v", req.HostList)
-	resp, err := getRanksFunc(method)(ctx, svc.rpcClient, req)
+	resp, err := method.Call(ctx, svc.rpcClient, req)
 	if err != nil {
 		return nil, err
 	}
@@ -91,66 +104,33 @@ func (svc *ControlService) rpcToRanks(ctx context.Context, req *control.RanksReq
 
 	// synthesise "Stopped" rank results for any harness host errors
 	hostRanks := svc.membership.HostRanks(req.Ranks...)
-	for errMsg, hostSet := range resp.HostErrors {
-		for _, addr := range strings.Split(hostSet.DerangedString(), ",") {
-			// TODO: should annotate member state with "harness unresponsive" err
+	for _, hes := range resp.HostErrors {
+		for _, addr := range strings.Split(hes.HostSet.DerangedString(), ",") {
 			for _, rank := range hostRanks[addr] {
 				results = append(results,
-					system.NewMemberResult(rank, string(method), errors.New(errMsg),
-						system.MemberStateStopped))
+					&system.MemberResult{
+						Rank: rank, Msg: hes.HostError.Error(),
+						State: system.MemberStateUnresponsive,
+					})
 			}
 			svc.log.Debugf("harness %s (ranks %v) host error: %s",
-				addr, hostRanks[addr], errMsg)
+				addr, hostRanks[addr], hes.HostError)
 		}
 	}
 
 	return results, nil
 }
 
-// pingMembers requests registered harness to ping their instances (system
-// members) in order to determine IO Server process responsiveness. Update membership
-// appropriately.
-//
-// Each host address represents a gRPC server associated with a harness managing
-// one or more data-plane instances (DAOS system members).
-func (svc *ControlService) pingMembers(ctx context.Context, req *control.RanksReq) error {
-	results, err := svc.rpcToRanks(ctx, req, ping)
-	if err != nil {
-		return err
-	}
-
-	// only update members in the appropriate state (Joined/Stopping)
-	// leave unresponsive members to be updated by a join
-	filteredMembers := svc.membership.Members(req.Ranks, system.MemberStateEvicted,
-		system.MemberStateErrored, system.MemberStateUnknown,
-		system.MemberStateStopped, system.MemberStateUnresponsive)
-
-	for _, m := range filteredMembers {
-		for _, r := range results {
-			// Update either:
-			// - members unresponsive to ping
-			// - members with stopped processes
-			// - members returning errors e.g. from dRPC ping
-			if !r.Rank.Equals(m.Rank) ||
-				(r.State != system.MemberStateUnresponsive &&
-					r.State != system.MemberStateStopped &&
-					r.State != system.MemberStateErrored) {
-
-				continue
-			}
-			if err := svc.membership.SetMemberState(m.Rank, r.State); err != nil {
-				return errors.Wrapf(err, "setting state of rank %d", m.Rank)
-			}
-		}
-	}
-
-	return nil
-}
-
 // SystemQuery implements the method defined for the Management Service.
 //
 // Return status of system members specified in request rank list (or all
 // members if request rank list is empty).
+//
+// Request harnesses to ping their instances (system members) to determine
+// IO Server process responsiveness. Update membership appropriately.
+//
+// This control service method is triggered from the control API method of the
+// same name in lib/control/system.go and returns results from all selected ranks.
 func (svc *ControlService) SystemQuery(parent context.Context, pbReq *ctlpb.SystemQueryReq) (*ctlpb.SystemQueryResp, error) {
 	svc.log.Debug("Received SystemQuery RPC")
 
@@ -162,10 +142,15 @@ func (svc *ControlService) SystemQuery(parent context.Context, pbReq *ctlpb.Syst
 	defer cancel()
 
 	req := &control.RanksReq{Ranks: system.RanksFromUint32(pbReq.GetRanks())}
-	if err := svc.pingMembers(ctx, req); err != nil {
+	results, err := svc.rpcFanout(ctx, req, ping)
+	if err != nil {
 		return nil, err
 	}
-	members := svc.membership.Members(req.Ranks)
+	// pass ignoreErrored == false to update member state when failing ping
+	if err = svc.membership.UpdateMemberStates(results, false); err != nil {
+		return nil, err
+	}
+	members := svc.membership.Members(req.Ranks...)
 
 	pbResp := &ctlpb.SystemQueryResp{}
 	if err := convert.Types(members, &pbResp.Members); err != nil {
@@ -179,7 +164,13 @@ func (svc *ControlService) SystemQuery(parent context.Context, pbReq *ctlpb.Syst
 
 // SystemStop implements the method defined for the Management Service.
 //
-// Initiate controlled shutdown of DAOS system, return results for each rank.
+// Initiate two-phase controlled shutdown of DAOS system, return results for
+// each selected rank. First phase results in "PrepShutdown" dRPC requests being
+// issued to each rank and the second phase stops the running executable
+// processes associated with each rank.
+//
+// This control service method is triggered from the control API method of the
+// same name in lib/control/system.go and returns results from all selected ranks.
 func (svc *ControlService) SystemStop(parent context.Context, pbReq *ctlpb.SystemStopReq) (*ctlpb.SystemStopResp, error) {
 	svc.log.Debug("Received SystemStop RPC")
 
@@ -201,15 +192,19 @@ func (svc *ControlService) SystemStop(parent context.Context, pbReq *ctlpb.Syste
 	if pbReq.GetPrep() {
 		svc.log.Debug("preparing ranks for shutdown")
 
-		results, err := svc.rpcToRanks(ctx, req, prep)
+		results, err := svc.rpcFanout(ctx, req, prep)
 		if err != nil {
 			return nil, err
 		}
-		if err = svc.membership.UpdateMemberStates(results); err != nil {
+		if err = svc.membership.UpdateMemberStates(results, true); err != nil {
 			return nil, err
 		}
 		if err = convert.Types(results, &pbResp.Results); err != nil {
 			return nil, err
+		}
+		action := string(prep)
+		for _, result := range pbResp.Results {
+			result.Action = action
 		}
 		if !req.Force && results.HasErrors() {
 			return pbResp, errors.New("PrepShutdown HasErrors")
@@ -219,15 +214,19 @@ func (svc *ControlService) SystemStop(parent context.Context, pbReq *ctlpb.Syste
 	if pbReq.GetKill() {
 		svc.log.Debug("shutting down ranks")
 
-		results, err := svc.rpcToRanks(ctx, req, stop)
+		results, err := svc.rpcFanout(ctx, req, stop)
 		if err != nil {
 			return nil, err
 		}
-		if err = svc.membership.UpdateMemberStates(results); err != nil {
+		if err = svc.membership.UpdateMemberStates(results, true); err != nil {
 			return nil, err
 		}
 		if err = convert.Types(results, &pbResp.Results); err != nil {
 			return nil, err
+		}
+		action := string(stop)
+		for _, result := range pbResp.Results {
+			result.Action = action
 		}
 	}
 
@@ -245,6 +244,9 @@ func (svc *ControlService) SystemStop(parent context.Context, pbReq *ctlpb.Syste
 // Initiate controlled start of DAOS system instances (system members)
 // after a controlled shutdown using information in the membership registry.
 // Return system start results.
+//
+// This control service method is triggered from the control API method of the
+// same name in lib/control/system.go and returns results from all selected ranks.
 func (svc *ControlService) SystemStart(parent context.Context, pbReq *ctlpb.SystemStartReq) (*ctlpb.SystemStartResp, error) {
 	svc.log.Debug("Received SystemStart RPC")
 
@@ -256,11 +258,11 @@ func (svc *ControlService) SystemStart(parent context.Context, pbReq *ctlpb.Syst
 	defer cancel()
 
 	req := &control.RanksReq{Ranks: system.RanksFromUint32(pbReq.GetRanks())}
-	results, err := svc.rpcToRanks(ctx, req, start)
+	results, err := svc.rpcFanout(ctx, req, start)
 	if err != nil {
 		return nil, err
 	}
-	if err := svc.membership.UpdateMemberStates(results); err != nil {
+	if err := svc.membership.UpdateMemberStates(results, true); err != nil {
 		return nil, err
 	}
 
@@ -268,8 +270,52 @@ func (svc *ControlService) SystemStart(parent context.Context, pbReq *ctlpb.Syst
 	if err := convert.Types(results, &pbResp.Results); err != nil {
 		return nil, err
 	}
+	action := string(start)
+	for _, result := range pbResp.Results {
+		result.Action = action
+	}
 
 	svc.log.Debug("Responding to SystemStart RPC")
+
+	return pbResp, nil
+}
+
+// SystemResetFormat implements the method defined for the Management Service.
+//
+// Prepare to reformat DAOS system by resetting format state of each rank
+// and await storage format on each relevant instance (system member).
+//
+// This control service method is triggered from the control API method of the
+// same name in lib/control/system.go and returns results from all selected ranks.
+func (svc *ControlService) SystemResetFormat(parent context.Context, pbReq *ctlpb.SystemResetFormatReq) (*ctlpb.SystemResetFormatResp, error) {
+	svc.log.Debug("Received SystemResetFormat RPC")
+
+	if pbReq == nil {
+		return nil, errors.New("nil request")
+	}
+
+	ctx, cancel := context.WithTimeout(parent, systemReqTimeout)
+	defer cancel()
+
+	req := &control.RanksReq{Ranks: system.RanksFromUint32(pbReq.GetRanks())}
+	results, err := svc.rpcFanout(ctx, req, reset)
+	if err != nil {
+		return nil, err
+	}
+	if err := svc.membership.UpdateMemberStates(results, true); err != nil {
+		return nil, err
+	}
+
+	pbResp := &ctlpb.SystemResetFormatResp{}
+	if err := convert.Types(results, &pbResp.Results); err != nil {
+		return nil, err
+	}
+	action := string(reset)
+	for _, result := range pbResp.Results {
+		result.Action = action
+	}
+
+	svc.log.Debug("Responding to SystemResetFormat RPC")
 
 	return pbResp, nil
 }
