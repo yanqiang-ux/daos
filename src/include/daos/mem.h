@@ -41,8 +41,10 @@
  * umem		Unified memory abstraction
  * umoff	Unified Memory offset
  */
-
+#ifndef DAOS_CLIENT_BUILD
 #include <libpmemobj.h>
+#endif
+
 
 /** The offset of an object from the base address of the pool */
 typedef uint64_t		umem_off_t;
@@ -64,6 +66,20 @@ typedef uint64_t		umem_off_t;
 #define UMOFF_NULL		(0ULL)
 /** Check for a NULL value including possible invalid flag bits */
 #define UMOFF_IS_NULL(umoff)	(umem_off2offset(umoff) == 0)
+
+enum _vmem_pobj_tx_stage {
+	VT_STAGE_NONE,		/* no transaction in this thread */
+	VT_STAGE_WORK,		/* transaction in progress */
+	VT_STAGE_ONCOMMIT,	/* successfully committed */
+	VT_STAGE_ONABORT,	/* tx_begin failed or transaction aborted */
+	VT_STAGE_FINALLY,	/* always called */
+
+	MAX_VT_TX_STAGE
+};
+
+#define VMEM_FLAG_ZERO	(((uint64_t)1) << 0)
+#define VMEM_FLAG_NO_FLUSH	(((uint64_t)1) << 1)
+
 
 /** Retrieves any flags that are set.
  *
@@ -205,6 +221,7 @@ typedef struct {
 	/** commit memory transaction */
 	int		 (*mo_tx_commit)(struct umem_instance *umm);
 
+#ifndef DAOS_CLIENT_BUILD
 	/**
 	 * Reserve space with specified size.
 	 *
@@ -237,7 +254,7 @@ typedef struct {
 	int		 (*mo_tx_publish)(struct umem_instance *umm,
 					  struct pobj_action *actv,
 					  int actv_cnt);
-
+#endif
 	/**
 	 * Add one commit or abort callback to current transaction.
 	 *
@@ -261,9 +278,13 @@ typedef struct {
 /** attributes to initialize an unified memory class */
 struct umem_attr {
 	umem_class_id_t			 uma_id;
+#ifndef DAOS_CLIENT_BUILD
 	PMEMobjpool			*uma_pool;
 	/** Slabs of the umem pool */
 	struct pobj_alloc_class_desc	 uma_slabs[UMM_SLABS_CNT];
+#else
+	void				*uma_pool;
+#endif
 };
 
 /** instance of an unified memory class */
@@ -271,17 +292,24 @@ struct umem_instance {
 	umem_class_id_t		 umm_id;
 	int			 umm_nospc_rc;
 	const char		*umm_name;
+#ifndef DAOS_CLIENT_BUILD
 	PMEMobjpool		*umm_pool;
+#else
+	void			*umm_pool;
+#endif
 	/** Cache the pool id field for umem addresses */
 	uint64_t		 umm_pool_uuid_lo;
 	/** Cache the base address of the pool */
 	uint64_t		 umm_base;
 	/** class member functions */
 	umem_ops_t		*umm_ops;
+#ifndef DAOS_CLIENT_BUILD
 	/** Slabs of the umem pool */
 	struct pobj_alloc_class_desc	 umm_slabs[UMM_SLABS_CNT];
+#endif
 };
 
+#ifndef DAOS_CLIENT_BUILD
 static inline bool
 umem_slab_registered(struct umem_instance *umm, unsigned int slab_id)
 {
@@ -302,6 +330,7 @@ umem_slab_usize(struct umem_instance *umm, unsigned int slab_id)
 	D_ASSERT(slab_id < UMM_SLABS_CNT);
 	return umm->umm_slabs[slab_id].unit_size;
 }
+#endif
 
 int  umem_class_init(struct umem_attr *uma, struct umem_instance *umm);
 void umem_attr_get(struct umem_instance *umm, struct umem_attr *uma);
@@ -375,11 +404,21 @@ umem_has_tx(struct umem_instance *umm)
 #define umem_alloc(umm, size)						\
 	umem_alloc_verb(umm, 0, size)
 
+#ifndef DAOS_CLIENT_BUILD
 #define umem_zalloc(umm, size)						\
 	umem_alloc_verb(umm, POBJ_FLAG_ZERO, size)
+#else
+#define umem_zalloc(umm, size)						\
+	umem_alloc_verb(umm, VMEM_FLAG_ZERO, size)
+#endif
 
+#ifndef DAOS_CLIENT_BUILD
 #define umem_alloc_noflush(umm, size)					\
 	umem_alloc_verb(umm, POBJ_FLAG_NO_FLUSH, size)
+#else
+#define umem_alloc_noflush(umm, size)					\
+	umem_alloc_verb(umm, VMEM_FLAG_NO_FLUSH, size)
+#endif
 
 #define umem_free(umm, umoff)						\
 ({									\
@@ -447,6 +486,7 @@ umem_tx_end(struct umem_instance *umm, int err)
 		return umem_tx_commit(umm);
 }
 
+#ifndef DAOS_CLIENT_BUILD
 static inline umem_off_t
 umem_reserve(struct umem_instance *umm, struct pobj_action *act, size_t size)
 {
@@ -471,6 +511,7 @@ umem_tx_publish(struct umem_instance *umm, struct pobj_action *actv,
 		return umm->umm_ops->mo_tx_publish(umm, actv, actv_cnt);
 	return 0;
 }
+#endif
 
 static inline int
 umem_tx_add_callback(struct umem_instance *umm, struct umem_tx_stage_data *txd,

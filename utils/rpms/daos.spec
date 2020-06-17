@@ -250,7 +250,8 @@ getent passwd daos_server >/dev/null || useradd -M daos_server
 %dir %{_prefix}%{_sysconfdir}
 %{_prefix}%{_sysconfdir}/vos_dfs_sample.yaml
 %{_prefix}%{_sysconfdir}/vos_size_input.yaml
-%{_libdir}/libdaos_common.so
+%{_libdir}/daos_srv/libdaos_common.so
+%{_libdir}/daos_srv/libdaos_common_cli.so
 # TODO: this should move from daos_srv to daos
 %{_libdir}/daos_srv/libplacement.so
 # Certificate generation files
@@ -364,6 +365,9 @@ getent passwd daos_server >/dev/null || useradd -M daos_server
 %{_libdir}/*.a
 
 %changelog
+* Tue Jun 16 2020 Vish Venkatesan <vishwanath.venkatesan@intel.com> - 1.1.0-23
+- Add client and server only commons library to RPM build
+
 * Fri Jun 05 2020 Ryon Jensen <ryon.jensen@intel.com> - 1.1.0-23
 - Add libisa-l_crypto dependency
 

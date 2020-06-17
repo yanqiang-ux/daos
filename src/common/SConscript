@@ -1,6 +1,30 @@
 """Build common libraries"""
 import daos_build
 
+COMMONSRC_FILES = ['debug.c', 'mem.c', 'fail_loc.c', 'lru.c', 'misc.c',
+                   'pool_map.c', 'sort.c', 'btree.c', 'prop.c',
+                   'btree_class.c', 'tse.c', 'rsvc.c', 'checksum.c',
+                   'drpc.c', 'drpc.pb-c.c', 'proc.c',
+                   'acl_api.c', 'acl_util.c', 'acl_principal.c',
+                   'profile.c']
+
+def build_common(env, client, prereqs):
+    denv = env.Clone()
+
+    if client:
+        denv.Append(CPPDEFINES=['-DDAOS_CLIENT_BUILD'])
+        denv.Append(OBJPREFIX="v_")
+        libname = 'daos_common_cli'
+        path    = '$PREFIX/lib64/'
+    else:
+        prereqs.require(denv, 'pmdk')
+        libname = 'daos_common'
+        path    = '$PREFIX/lib64/daos_srv/'
+
+    common_src = COMMONSRC_FILES
+    common = daos_build.library(denv, libname, common_src)
+    denv.Install(path, common)
+
 def scons():
     """Execute build"""
     Import('env', 'prereqs', 'platform_arm')
@@ -12,25 +36,16 @@ def scons():
     # is correct, but set _libs to [] so that the library isn't
     # linked in.
 
-    prereqs.require(env, 'pmdk')
-
-    if not platform_arm:
-        prereqs.require(env, 'isal')
-        prereqs.require(env, 'isal_crypto')
+    prereqs.require(env, 'isal')
+    prereqs.require(env, 'isal_crypto')
 
     denv = env.Clone()
 
     prereqs.require(denv, 'protobufc')
     denv.AppendUnique(LIBS=['cart', 'gurt'])
-    common_src = ['debug.c', 'mem.c', 'fail_loc.c', 'lru.c',
-                  'misc.c', 'pool_map.c', 'sort.c', 'btree.c', 'prop.c',
-                  'btree_class.c', 'tse.c', 'rsvc.c', 'checksum.c',
-                  'drpc.c', 'drpc.pb-c.c', 'proc.c',
-                  'acl_api.c', 'acl_util.c', 'acl_principal.c',
-                  'profile.c']
 
-    common = daos_build.library(denv, 'libdaos_common', common_src)
-    denv.Install('$PREFIX/lib64/', common)
+    build_common(denv, False, prereqs)
+    build_common(denv, True, prereqs)
 
     tenv = denv.Clone()
 
