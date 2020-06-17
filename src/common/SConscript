@@ -9,17 +9,18 @@ COMMONSRC_FILES = ['debug.c', 'mem.c', 'fail_loc.c', 'lru.c', 'misc.c',
                    'profile.c']
 
 def build_common(env, client, prereqs):
+    """Building server and client version of common library"""
     denv = env.Clone()
 
     if client:
         denv.Append(CPPDEFINES=['-DDAOS_CLIENT_BUILD'])
         denv.Append(OBJPREFIX="v_")
         libname = 'daos_common_cli'
-        path    = '$PREFIX/lib64/'
+        path = '$PREFIX/lib64/'
     else:
         prereqs.require(denv, 'pmdk')
         libname = 'daos_common'
-        path    = '$PREFIX/lib64/daos_srv/'
+        path = '$PREFIX/lib64/daos_srv/'
 
     common_src = COMMONSRC_FILES
     common = daos_build.library(denv, libname, common_src)
@@ -27,7 +28,7 @@ def build_common(env, client, prereqs):
 
 def scons():
     """Execute build"""
-    Import('env', 'prereqs', 'platform_arm')
+    Import('env', 'prereqs')
 
     env.AppendUnique(LIBPATH=[Dir('.')])
 

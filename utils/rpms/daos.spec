@@ -6,7 +6,7 @@
 
 Name:          daos
 Version:       1.1.0
-Release:       23%{?relval}%{?dist}
+Release:       24%{?relval}%{?dist}
 Summary:       DAOS Storage Engine
 
 License:       Apache
@@ -365,7 +365,7 @@ getent passwd daos_server >/dev/null || useradd -M daos_server
 %{_libdir}/*.a
 
 %changelog
-* Tue Jun 16 2020 Vish Venkatesan <vishwanath.venkatesan@intel.com> - 1.1.0-23
+* Tue Jun 16 2020 Vish Venkatesan <vishwanath.venkatesan@intel.com> - 1.1.0-24
 - Add client and server only commons library to RPM build
 
 * Fri Jun 05 2020 Ryon Jensen <ryon.jensen@intel.com> - 1.1.0-23
