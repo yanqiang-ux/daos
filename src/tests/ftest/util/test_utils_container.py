@@ -31,6 +31,7 @@ from command_utils_base import BasicParameter
 from pydaos.raw import (DaosApiError, DaosContainer, DaosInputParams,
                         c_uuid_to_str, str_to_c_uuid)
 from general_utils import get_random_string, DaosTestError
+from security_utils import ACL
 
 
 class TestContainerData(object):
@@ -264,6 +265,7 @@ class TestContainer(TestDaosApiBase):
         super(TestContainer, self).__init__("/run/container/*", cb_handler)
         self.pool = pool
 
+        self.acl = ACL()
         self.object_qty = BasicParameter(None)
         self.record_qty = BasicParameter(None)
         self.akey_size = BasicParameter(None)
@@ -478,6 +480,24 @@ class TestContainer(TestDaosApiBase):
             self.log.info("Querying container %s", self.uuid)
             self._call_method(self.container.query, {"coh": coh})
             self.info = self.container.info
+
+    @fail_on(DaosApiError)
+    def get_acl(self):
+        """Query the container for ACL information."""
+        acl_out = []
+        if self.container:
+            self.log.info("Get-acl for container: %s", self.uuid)
+            if self.control_method.value == self.USE_DAOS and self.daos:
+                acl_out = self.dmg.get_output("pool_get_acl", 8, pool=self.uuid)
+                for entry in acl_out:
+                    self.acl.str_to_entry(entry)
+            elif self.control_method.value == self.USE_DAOS:
+                self.log.error("Error: Undefined daos command")
+            else:
+                self.log.error(
+                    "Error: Undefined control_method: %s",
+                    self.control_method.value)
+        return acl_out
 
     def check_container_info(self, ci_uuid=None, ci_nsnapshots=None):
         # pylint: disable=unused-argument

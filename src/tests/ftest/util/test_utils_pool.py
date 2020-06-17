@@ -35,6 +35,7 @@ from general_utils import check_pool_files, DaosTestError, run_command
 from env_modules import load_mpi
 
 from dmg_utils import get_pool_uuid_service_replicas_from_stdout
+from security_utils import ACL
 
 
 class TestPool(TestDaosApiBase):
@@ -63,6 +64,7 @@ class TestPool(TestDaosApiBase):
         self.uid = os.geteuid()
         self.gid = os.getegid()
 
+        self.acl = ACL()
         self.mode = BasicParameter(None)
         self.name = BasicParameter(None)            # server group name
         self.svcn = BasicParameter(None)
@@ -294,6 +296,24 @@ class TestPool(TestDaosApiBase):
             self.connect()
             self._call_method(self.pool.pool_query, {})
             self.info = self.pool.pool_info
+
+    @fail_on(CommandFailure)
+    def get_acl(self):
+        """Query the pool for ACL information."""
+        acl_out = []
+        if self.pool:
+            self.log.info("Get-acl for pool: %s", self.uuid)
+            if self.control_method.value == self.USE_DMG and self.dmg:
+                acl_out = self.dmg.get_output("pool_get_acl", 8, pool=self.uuid)
+                for entry in acl_out:
+                    self.acl.str_to_entry(entry)
+            elif self.control_method.value == self.USE_DMG:
+                self.log.error("Error: Undefined dmg command")
+            else:
+                self.log.error(
+                    "Error: Undefined control_method: %s",
+                    self.control_method.value)
+        return acl_out
 
     def check_pool_info(self, pi_uuid=None, pi_ntargets=None, pi_nnodes=None,
                         pi_ndisabled=None, pi_map_ver=None, pi_leader=None,

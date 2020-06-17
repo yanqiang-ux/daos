@@ -249,7 +249,7 @@ class ExecutableCommand(CommandWithParameters):
                 r"\d+\s+([DRSTtWXZ<NLsl+]+)\s+\d+", result.stdout)
         return state
 
-    def get_output(self, method_name, **kwargs):
+    def get_output(self, method_name, flags=0, **kwargs):
         """Get output from the command issued by the specified method.
 
         Issue the specified method and return a list of strings that result from
@@ -258,6 +258,7 @@ class ExecutableCommand(CommandWithParameters):
 
         Args:
             method_name (str): name of the method to execute
+            flags (int, optional): regex flags i.e. re.M, re.I, re.S
 
         Raises:
             CommandFailure: if there is an error finding the method, finding the
@@ -285,7 +286,7 @@ class ExecutableCommand(CommandWithParameters):
         if not isinstance(result, process.CmdResult):
             raise CommandFailure(
                 "{}() did not return a CmdResult".format(method_name))
-        return re.findall(pattern, result.stdout)
+        return re.findall(pattern, result.stdout, flags=flags)
 
     def get_environment(self, manager, log_file=None):
         """Get the environment variables to export for the command.

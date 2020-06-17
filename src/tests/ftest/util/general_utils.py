@@ -40,6 +40,37 @@ class DaosTestError(Exception):
     """DAOS API exception class."""
 
 
+def write_file(hosts, file, content):
+    """Write to a file.
+
+    Args:
+        file (str): filename and it's full path i.e. /path/to/file.txt
+        content (str): formatted string with contents to be placed in file.
+
+    Returns:
+        str: the full path of the written hostfile
+
+    """
+    log = getLogger()
+
+    if not os.path.exists(path):
+        os.makedirs(path)
+
+    # Get file full_path
+    full_path = os.path.join(path, ".".join([filename, ext]))
+
+    # Write to file
+    log.info("Writing %s", full_path)
+    try:
+        with open(full_path, "w") as f_handle:
+            f_handle.write(content)
+    except IOError:
+       log.error("Error writing to file: %s", full_path)
+       full_path = None
+
+    return full_path
+
+
 def human_to_bytes(h_size):
     """Convert human readable size values to respective byte value.
 

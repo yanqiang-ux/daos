@@ -79,7 +79,8 @@ class DaosCommand(CommandWithSubCommand):
         #  04/20-17:52:33.63 wolf-3 Container attributes:
         #  04/20-17:52:33.63 wolf-3 attr1
         #  04/20-17:52:33.63 wolf-3 attr2
-        "container_list_attrs": r"\n \S+ \S+ (.+)"
+        "container_list_attrs": r"\n \S+ \S+ (.+)",
+        "container_get_acl": r"^(?!#).+$",
     }
 
     def __init__(self, path):

@@ -26,166 +26,31 @@ import os
 import random
 from general_utils import pcmd
 from apricot import TestWithServers
+from general_utils import create_local_file
 
-
-class ACE(object):
-    """A class for an ACL entry."""
-
-    PERMISSIONS = {
-        "read": "r",
-        "write": "w",
-        "create": "c",
-        "delete": "d",
-        "get-prop": "t",
-        "set-prop": "T",
-        "get-acl": "a",
-        "set-acl": "A",
-        "set-owner": "o",
-    }
-
-    def __init__(self, acl_type=None, flags=None, principal=None,
-                 permissions=None):
-        """ Create the ACE object.
-
-        Args:
-            acl_type (str): type of entry.
-            flags (str): information on how the ACE should be interpreted.
-            principal (str): the identity, specified in name@domain format.
-            permissions (set, optional): type of user access to resources.
-        """
-        self.acl_type = acl_type.upper()
-        self.flags = flags.upper()
-
-        # Add correct format
-        if not principal.endswith("@"):
-            self.principal = principal + "@"
-
-        # Assign permissions through setter
-        self.permissions = permissions
-
-    @property
-    def permissions(self):
-        """Get permissions for this entry.
-
-        Returns:
-            list: list of permissions given to this entry
-
-        """
-        return self._permissions
-
-    @permissions.setter
-    def permissions(self, permissions):
-        """Set permissions for this entry."""
-        if permissions and not isinstance(permissions, set):
-            self._permissions = set(permissions)
-        else:
-            self._permissions = set([])
-
-    def __str__(self):
-        """Convert this ACE into a string of the following format:
-            TYPE:FLAGS:PRINCIPAL:PERMISSIONS
-
-        Returns:
-            str: the string version of the ACE values.
-
-        """
-        return "{}:{}:{}:{}".format(
-            self.acl_type,
-            self.flags,
-            self.principal,
-            "".join(self._permissions))
-
-    def __repr__(self):
-        """Convert this ACE into a string.
-
-        Returns:
-            str: the representation string for the ACE.
-
-        """
-        return "ACL Entry: {}".format(self.__str__())
-
-    def grant_permission(self, permission):
-        """Grant permissions to this entry.
-
-        Args:
-            permission (str): permission to be granted i.e. read, write, create
-
-        Returns:
-            list: list of permissions given to this entry
-
-        """
-        if permission in self.PERMISSIONS:
-            self._permissions.add(self.PERMISSIONS[permission])
-        return self._permissions
-
-    def revoke_permission(self, permission):
-        """Revoke permissions to this entry.
-
-        Args:
-            permission (str): permission to be revoked i.e. read, write, create
-
-        Returns:
-            list: list of permissions given to this entry.
-
-        """
-        if permission in self.PERMISSIONS and \
-           self.PERMISSIONS[permission] in self._permissions:
-            self._permissions.remove(self.PERMISSIONS[permission])
-
-        return self.permissions
-
-
-class ACL(object):
-    """A class for managing an ACL."""
-
-    def __init__(self, acl_path, filename):
-        """Create a Access Control List object."""
-        self.entries = {}
-        self.acl_path = acl_path
-        self.filename = filename
-
-    def __str__(self):
-        """Get ACL entries into ACL file format.
-
-        Returns:
-            str: ACL file formatting, with each entry in a new line.
-
-        """
-        return "{}".format("\n".join(self.entries.values()))
-
-    def add(self, key, entries):
-        """Add entries to ACL object.
-
-        Args:
-            key (str): identifier for ACE to be added.
-            entries (set): list or set of entries
-
-        Returns:
-            dict: dictionary containing entries in ACL.
-
-        """
-        if key in self.entries:
-            for entry in entries:
-                self.entries[key].add(entry)
-        else:
-            self.entries[key] = set(entries)
-
-    def reset(self):
-        """Reset ACL object and clear all entries."""
-        self.entries.clear()
-
-    def create_acl_file(self, host):
-        """Create an ACL file from the entries.
-
-        Raises:
-
-        """
 
 class SecurityTestBase(TestWithServers):
     """Base security test class.
 
     :avocado: recursive
     """
+
+    def __init__(self):
+        """Initialize a SecurityTestBase object."""
+
+    def acl_entry(usergroup, name, perm, permissions):
+        """Create acl entry for the specified user or group and permission.
+
+        Args:
+            usergroup (str): user or group.
+            name (str): user or group name to be created.
+            permission (str): permission to be created.
+
+        Return:
+            str: daos pool acl entry.
+
+        """
+
 
 def acl_entry(usergroup, name, perm, permissions):
     """Create a daos acl entry for the specified user or group and permission
