@@ -262,7 +262,8 @@ class TestContainer(TestDaosApiBase):
             cb_handler (CallbackHandler, optional): callback object to use with
                 the API methods. Defaults to None.
         """
-        super(TestContainer, self).__init__("/run/container/*", cb_handler)
+        super(TestContainer, self).__init__(
+            "/run/container/*", cb_handler, daos_command)
         self.pool = pool
 
         self.acl = ACL()
@@ -275,9 +276,6 @@ class TestContainer(TestDaosApiBase):
         # Provider access to get input params values
         # for enabling different container properties
         self.input_params = DaosInputParams()
-
-        # Optional daos command object to use with the USE_DAOS control method
-        self.daos = daos_command
 
         # Optional daos command argument values to use with the USE_DAOS control
         # method when creating/destroying containers
@@ -292,6 +290,8 @@ class TestContainer(TestDaosApiBase):
         self.info = None
         self.opened = False
         self.written_data = []
+
+        self.supported_control_methods = (self.USE_API, self.USE_DAOS)
 
     def __str__(self):
         """Return a string representation of this TestContainer object.
@@ -318,6 +318,35 @@ class TestContainer(TestDaosApiBase):
             "Creating a container with pool handle %s",
             self.pool.pool.handle.value)
         self.container = DaosContainer(self.pool.context)
+
+        # Setup args for API use
+        api_kwargs = {"poh": self.pool.pool.handle}
+        if uuid is not None:
+            api_kwargs["con_uuid"] = uuid
+
+        # Refer daos_api for setting input params for DaosContainer.
+        if con_in is not None:
+            cop = self.input_params.get_con_create_params()
+            cop.type = con_in[0]
+            cop.enable_chksum = con_in[1]
+            cop.srv_verify = con_in[2]
+            cop.chksum_type = con_in[3]
+            cop.chunk_size = con_in[4]
+            api_kwargs["con_prop"] = cop
+
+        # Setup args for daos cmd use
+        daos_kwargs = {
+            "pool": self.pool.uuid,
+            "sys_name": self.pool.name.value,
+            "svc": ",".join(str(rank) for rank in self.pool.svc_ranks),
+            "cont": uuid,
+            "path": self.path.value,
+            "cont_type": self.type.value,
+            "oclass": self.oclass.value,
+            "chunk_size": self.chunk_size.value,
+            "properties": self.properties.value,
+            "acl_file": acl_file,
+        }
 
         if self.control_method.value == self.USE_API:
             # Create a container with the API method

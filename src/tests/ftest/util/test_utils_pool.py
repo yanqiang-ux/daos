@@ -28,6 +28,7 @@ import ctypes
 from test_utils_base import TestDaosApiBase
 
 from avocado import fail_on
+from avocado.utils import process
 from command_utils import BasicParameter, CommandFailure
 from pydaos.raw import (DaosApiError, DaosServer, DaosPool, c_uuid_to_str,
                         daos_cref)
@@ -59,7 +60,7 @@ class TestPool(TestDaosApiBase):
                 It'll return the object with -l <Access Point host:port> and
                 --insecure.
         """
-        super(TestPool, self).__init__("/run/pool/*", cb_handler)
+        super(TestPool, self).__init__("/run/pool/*", cb_handler, dmg_command)
         self.context = context
         self.uid = os.geteuid()
         self.gid = os.getegid()
@@ -80,7 +81,8 @@ class TestPool(TestDaosApiBase):
         self.cmd_output = None
         self.svc_ranks = None
         self.connected = False
-        self.dmg = dmg_command
+
+        self.supported_control_methods = (self.USE_API, self.USE_DMG)
 
     @fail_on(CommandFailure)
     @fail_on(DaosApiError)
@@ -120,7 +122,7 @@ class TestPool(TestDaosApiBase):
             self.log.info("Creating a pool")
 
         self.pool = DaosPool(self.context)
-        kwargs = {
+        cmd_kwargs = {
             "uid": self.uid,
             "gid": self.gid,
             "scm_size": self.scm_size.value,
@@ -128,22 +130,19 @@ class TestPool(TestDaosApiBase):
         for key in ("target_list", "svcn", "nvme_size"):
             value = getattr(self, key).value
             if value is not None:
-                kwargs[key] = value
+                cmd_kwargs[key] = value
+        api_kwargs = dict(cmd_kwargs)
+        api_kwargs["mode"] = self.mode.value
 
-        if self.control_method.value == self.USE_API:
-            # Create a pool with the API method
-            kwargs["mode"] = self.mode.value
-            self._call_method(self.pool.create, kwargs)
+        # Execute
+        self._run("create", api_kwargs, "pool_create", cmd_kwargs)
 
-        elif self.control_method.value == self.USE_DMG and self.dmg:
-            # Create a pool with the dmg command
-            self._log_method("dmg.pool_create", kwargs)
-            result = self.dmg.pool_create(**kwargs)
+        if isinstance(self.cmd_result, process.CmdResult):
             # self.cmd_output to keep the actual stdout of dmg command for
             # checking the negative/warning message.
-            self.cmd_output = result.stdout
+            self.cmd_output = self.cmd_result.stdout
             uuid, svc = get_pool_uuid_service_replicas_from_stdout(
-                result.stdout)
+                self.cmd_result.stdout)
 
             # Populte the empty DaosPool object with the properties of the pool
             # created with dmg pool create.
@@ -162,14 +161,6 @@ class TestPool(TestDaosApiBase):
             # Set UUID and attached to the DaosPool object
             self.pool.set_uuid_str(uuid)
             self.pool.attached = 1
-
-        elif self.control_method.value == self.USE_DMG:
-            self.log.error("Error: Undefined dmg command")
-
-        else:
-            self.log.error(
-                "Error: Undefined control_method: %s",
-                self.control_method.value)
 
         # Set the TestPool attributes for the created pool
         self.svc_ranks = [
@@ -215,8 +206,6 @@ class TestPool(TestDaosApiBase):
             return True
         return False
 
-    @fail_on(CommandFailure)
-    @fail_on(DaosApiError)
     def destroy(self, force=1):
         """Destroy the pool with either API or dmg.
 
@@ -236,24 +225,9 @@ class TestPool(TestDaosApiBase):
             self.disconnect()
             if self.pool.attached:
                 self.log.info("Destroying pool %s", self.uuid)
-
-                if self.control_method.value == self.USE_API:
-                    # Destroy the pool with the API method
-                    self._call_method(self.pool.destroy, {"force": force})
-                    status = True
-
-                elif self.control_method.value == self.USE_DMG and self.dmg:
-                    # Destroy the pool with the dmg command
-                    self.dmg.pool_destroy(pool=self.uuid, force=force)
-                    status = True
-
-                elif self.control_method.value == self.USE_DMG:
-                    self.log.error("Error: Undefined dmg command")
-
-                else:
-                    self.log.error(
-                        "Error: Undefined control_method: %s",
-                        self.control_method.value)
+                kwargs = {"force": force, "pool": self.uuid}
+                status = self._run(
+                    "destroy", kwargs.items()[0], "pool_destroy", kwargs)
 
             self.pool = None
             self.uuid = None
@@ -262,7 +236,6 @@ class TestPool(TestDaosApiBase):
 
         return status
 
-    @fail_on(CommandFailure)
     def set_property(self):
         """Set Property.
 
@@ -272,19 +245,12 @@ class TestPool(TestDaosApiBase):
         """
         if self.pool:
             self.log.info("Set-prop for Pool: %s", self.uuid)
-
-            if self.control_method.value == self.USE_DMG and self.dmg:
-                # set-prop for given pool using dmg
-                self.dmg.pool_set_prop(self.uuid, self.prop_name,
-                                       self.prop_value)
-
-            elif self.control_method.value == self.USE_DMG:
-                self.log.error("Error: Undefined dmg command")
-
-            else:
-                self.log.error(
-                    "Error: Undefined control_method: %s",
-                    self.control_method.value)
+            kwargs = {
+                "pool": self.uuid,
+                "name": self.prop_name,
+                "value": self.prop_value
+            }
+            self._run(dmg_method="pool_set_prop", dmg_kw=kwargs)
 
     @fail_on(DaosApiError)
     def get_info(self):
@@ -303,6 +269,7 @@ class TestPool(TestDaosApiBase):
         acl_out = []
         if self.pool:
             self.log.info("Get-acl for pool: %s", self.uuid)
+
             if self.control_method.value == self.USE_DMG and self.dmg:
                 acl_out = self.dmg.get_output("pool_get_acl", 8, pool=self.uuid)
                 for entry in acl_out:

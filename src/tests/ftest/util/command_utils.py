@@ -258,15 +258,16 @@ class ExecutableCommand(CommandWithParameters):
 
         Args:
             method_name (str): name of the method to execute
-            flags (int, optional): regex flags i.e. re.M, re.I, re.S
+            flags (int, optional): regex flags i.e. re.M, re.I, re.S.
+                Defaults to 0 (no flags).
 
         Raises:
             CommandFailure: if there is an error finding the method, finding the
-                method's regex pattern, or executing the method
+                method's regex pattern, or executing the method.
 
         Returns:
             list: a list of strings obtained from the method's output parsed
-                through its regex
+                through its regex.
 
         """
         # Get the method to call to obtain the CmdResult
@@ -275,18 +276,31 @@ class ExecutableCommand(CommandWithParameters):
             raise CommandFailure(
                 "No '{}()' method defined for this class".format(method_name))
 
-        # Get the regex pattern to filter the CmdResult.stdout
-        if method_name not in self.METHOD_REGEX:
-            raise CommandFailure(
-                "No pattern regex defined for '{}()'".format(method_name))
-        pattern = self.METHOD_REGEX[method_name]
-
         # Run the command and parse the output using the regex
         result = method(**kwargs)
         if not isinstance(result, process.CmdResult):
             raise CommandFailure(
                 "{}() did not return a CmdResult".format(method_name))
-        return re.findall(pattern, result.stdout, flags=flags)
+        return self.parse_output(method_name, result.stdout, flags=flags)
+
+    def parse_output(self, method_name, stdout, flags=0):
+        """Parse
+
+        Args:
+            method_name (str): name of the method to execute
+            stdout (str): string to parse.
+
+        Returns:
+            list: a list of strings obtained from the method's output parsed
+                through its regex.
+
+        """
+        # Get the regex pattern to filter the CmdResult.stdout
+        if method_name not in self.METHOD_REGEX:
+            raise CommandFailure(
+                "No pattern regex defined for '{}()'".format(method_name))
+
+        return re.findall(self.METHOD_REGEX[method_name], stdout, flags=flags)
 
     def get_environment(self, manager, log_file=None):
         """Get the environment variables to export for the command.

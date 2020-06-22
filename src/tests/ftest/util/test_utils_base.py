@@ -24,7 +24,9 @@
 from logging import getLogger
 from time import sleep
 
+from avocado import fail_on
 from command_utils_base import ObjectWithParameters, BasicParameter
+from command_utils import CommandFailure
 from pydaos.raw import DaosApiError
 
 
@@ -83,7 +85,7 @@ class TestDaosApiBase(ObjectWithParameters):
     USE_DMG = "dmg"
     USE_DAOS = "daos"
 
-    def __init__(self, namespace, cb_handler=None):
+    def __init__(self, namespace, cb_handler=None, tool_command=None):
         """Create a TestDaosApi object.
 
         Args:
@@ -100,6 +102,9 @@ class TestDaosApiBase(ObjectWithParameters):
         #   USE_DMG    - use the dmg command to create/destroy pools/containers
         #   USE_DAOS   - use the daos command to create/destroy pools/containers
         self.control_method = BasicParameter(self.USE_API, self.USE_API)
+        self.control_object = None
+        self.cmd_result = None
+        self.supported_control_methods = (self.USE_API)
 
     def _log_method(self, name, kwargs):
         """Log the method call with its arguments.
@@ -112,6 +117,39 @@ class TestDaosApiBase(ObjectWithParameters):
             args = ", ".join(
                 ["{}={}".format(key, kwargs[key]) for key in sorted(kwargs)])
             self.log.debug("  %s(%s)", name, args)
+
+    @fail_on(CommandFailure)
+    @fail_on(DaosApiError)
+    def _run(self, api_method=None, api_kwargs=None,
+             cmd_method=None, cmd_kwargs=None):
+        """Run a method from api or cmd tool.
+
+        Args:
+            api_method (str): api method to be executed.
+            api_kwargs (str): Arbitrary keyword arguments for api method.
+            cmd_method (str): cmd method to be executed.
+            cmd_kwargs (str): Arbitrary keyword arguments for cmd method.
+        """
+        self.cmd_result = None
+        if self.control_method.value not in self.supported_control_methods:
+            raise CommandFailure("Invalid control method: {}, not a {}".format(
+                self.control_method.value, self.supported_control_methods))
+
+        if self.control_method.value == self.USE_API:
+            self._call_method(getattr(self.pool, api_method), **api_kwargs)
+
+        elif self.control_object is not None:
+            self.log.info(
+                "Running: %s with: %s", cmd_method, self.control_method.value)
+            try:
+                self.cmd_result = getattr(
+                    self.control_object, cmd_method)(**cmd_kwargs)
+            except AttributeError:
+                raise CommandFailure("Method {} is not defined for {}".format(
+                    cmd_method, self.control_object.command))
+        else:
+            raise CommandFailure("Undefined control_method: {}".format(
+                self.control_method.value))
 
     def _call_method(self, method, kwargs):
         """Call the DAOS API class method with the optional callback method.
