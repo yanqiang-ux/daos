@@ -33,6 +33,7 @@
 
 #include <daos_srv/pool.h>
 
+#include <unistd.h>
 #include <fcntl.h>
 #include <sys/stat.h>
 #include <daos_api.h> /* for daos_prop_alloc/_free() */
@@ -51,6 +52,8 @@
 #include "rpc.h"
 #include "srv_internal.h"
 #include "srv_layout.h"
+
+#define TODO(format, ...) D_PRINT("TODO: %s: "format"\n", __func__, ##__VA_ARGS__)
 
 /* Pool service */
 struct pool_svc {
@@ -3850,12 +3853,15 @@ get_open_handles_cb(daos_handle_t ih, d_iov_t *key, d_iov_t *val, void *varg)
 	size_t size_needed;
 	int rc = DER_SUCCESS;
 
+	TODO("ENTER");
+
 	if (key->iov_len != sizeof(uuid_t) ||
 	    val->iov_len != sizeof(struct pool_hdl)) {
 		D_ERROR("invalid key/value size: key="DF_U64" value="DF_U64"\n",
 			key->iov_len, val->iov_len);
 		return -DER_IO;
 	}
+	TODO("ITER HANDLE: "DF_UUID, DP_UUID(uuid));
 
 	/* Look up the handle in the local pool to obtain the creds, which are
 	 * not stored in RDB
@@ -3872,7 +3878,14 @@ get_open_handles_cb(daos_handle_t ih, d_iov_t *key, d_iov_t *val, void *varg)
 	 */
 	size_needed = arg->hdls_used + lookup_hdl->sph_cred.iov_buf_len +
 		sizeof(struct pool_iv_conn);
+	TODO("next: %zu", (uint64_t)arg->next);
+	TODO("hdls_used: %zu", arg->hdls_used);
+	TODO("iov_buf_len: %zu", lookup_hdl->sph_cred.iov_buf_len);
+	TODO("sizeof struct: %zu", sizeof(struct pool_iv_conn));
+	TODO("size_needed: %zu", size_needed);
+	TODO("hdls_size: %zu", arg->hdls_size);
 	if (size_needed > arg->hdls_size) {
+		TODO("REALLOC");
 		void *newbuf = NULL;
 		D_REALLOC(newbuf, *arg->hdls, size_needed);
 		if (newbuf == NULL)
@@ -3885,9 +3898,14 @@ get_open_handles_cb(daos_handle_t ih, d_iov_t *key, d_iov_t *val, void *varg)
 		arg->next = (struct pool_iv_conn *)
 			(((char *)*arg->hdls) + arg->hdls_used);
 		arg->hdls_size = size_needed;
+		TODO("realloc_next: %zu", (uint64_t)arg->next);
 	}
 
 	/* Copy the data */
+	TODO("HANDLE: uuid: "DF_UUID, DP_UUID(*uuid));
+	TODO("HANDLE: pic_flags: %08lX", hdl->ph_flags);
+	TODO("HANDLE: pic_capas: %08lX", hdl->ph_sec_capas);
+	TODO("HANDLE: pic_creds_size: %zu", lookup_hdl->sph_cred.iov_buf_len);
 	uuid_copy(arg->next->pic_hdl, *uuid);
 	arg->next->pic_flags = hdl->ph_flags;
 	arg->next->pic_capas = hdl->ph_sec_capas;
@@ -3897,11 +3915,14 @@ get_open_handles_cb(daos_handle_t ih, d_iov_t *key, d_iov_t *val, void *varg)
 
 	/* Adjust the pointers for the next iteration */
 	arg->hdls_used = size_needed;
+	TODO("hdls_used new: %zu", arg->hdls_used);
 	arg->next = (struct pool_iv_conn *)
 		(((char *)*arg->hdls) + arg->hdls_used);
 
 out_hdl:
 	ds_pool_hdl_put(lookup_hdl);
+
+	TODO("EXIT rc="DF_RC, DP_RC(rc));
 
 	return DER_SUCCESS;
 }
@@ -3931,6 +3952,7 @@ ds_pool_get_open_handles(uuid_t pool_uuid, d_iov_t *hdls)
 	uint32_t			 nhandles;
 	int				 rc;
 
+	TODO("ENTER");
 	d_iov_set(hdls, NULL, 0);
 
 	rc = pool_svc_lookup_leader(pool_uuid, &svc, NULL /* hint */);
@@ -3985,15 +4007,19 @@ ds_pool_get_open_handles(uuid_t pool_uuid, d_iov_t *hdls)
 	arg.hdls_size = nhandles * (sizeof(struct pool_iv_conn) + 128);
 	arg.hdls_used = 0;
 
+	TODO("PRE ITER");
 	/* Iterate the open handles and accumulate their UUIDs */
 	rc = rdb_tx_iterate(&tx, &svc->ps_handles, false /* backward */,
 			    get_open_handles_cb, &arg);
 	if (rc != 0)
 		D_GOTO(out_lock, rc);
+	TODO("POST ITER");
 
 	hdls->iov_buf_len = hdls->iov_len = arg.hdls_used;
 
 	D_DEBUG(DF_DSMS, DF_UUID": packed %u handles into %zu bytes\n",
+		DP_UUID(pool_uuid), nhandles, arg.hdls_used);
+	TODO(DF_UUID": packed %u handles into %zu bytes",
 		DP_UUID(pool_uuid), nhandles, arg.hdls_used);
 
 out_lock:
@@ -4003,6 +4029,7 @@ out_lock:
 out_svc:
 	pool_svc_put_leader(svc);
 
+	TODO("EXIT rc="DF_RC, DP_RC(rc));
 	return rc;
 }
 

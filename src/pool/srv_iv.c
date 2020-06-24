@@ -30,6 +30,14 @@
 #include <daos_srv/iv.h>
 #include <daos_prop.h>
 #include "srv_internal.h"
+#define TODO(format, ...) D_PRINT("TODO: %s: "format"\n", __func__, ##__VA_ARGS__)
+#define TODOENTRY(entry) \
+	((entry) == NULL ? "NULL" : \
+	 (entry)->iv_class == NULL ? "NULL" : \
+	 (entry)->iv_class->iv_class_id == IV_POOL_CONN ? "CONN" : \
+	 (entry)->iv_class->iv_class_id == IV_POOL_PROP ? "PROP" : \
+	 (entry)->iv_class->iv_class_id == IV_POOL_MAP ? "MAP" : \
+	 "OTHER")
 
 uint32_t
 pool_iv_map_ent_size(int nr)
@@ -57,6 +65,7 @@ pool_iv_value_alloc_internal(struct ds_iv_key *key, d_sg_list_t *sgl)
 	struct pool_iv_key *pool_key = (struct pool_iv_key *)key->key_buf;
 	uint32_t	buf_size = pool_key->pik_entry_size;
 	int		rc;
+	TODO("ENTER %u", buf_size);
 
 	D_ASSERT(buf_size > 0);
 	rc = daos_sgl_init(sgl, 1);
@@ -266,6 +275,7 @@ pool_iv_ent_init(struct ds_iv_key *iv_key, void *data,
 		 struct ds_iv_entry *entry)
 {
 	int	rc;
+	TODO("ENTER %s", TODOENTRY(entry));
 
 	rc = pool_iv_value_alloc_internal(iv_key, &entry->iv_value);
 	if (rc)
@@ -279,12 +289,14 @@ pool_iv_ent_init(struct ds_iv_key *iv_key, void *data,
 static int
 pool_iv_ent_get(struct ds_iv_entry *entry, void **priv)
 {
+	TODO("ENTER %s", TODOENTRY(entry));
 	return 0;
 }
 
 static int
 pool_iv_ent_put(struct ds_iv_entry *entry, void **priv)
 {
+	TODO("ENTER %s", TODOENTRY(entry));
 	return 0;
 }
 
@@ -364,7 +376,9 @@ static int
 pool_iv_ent_fetch(struct ds_iv_entry *entry, struct ds_iv_key *key,
 		  d_sg_list_t *dst, d_sg_list_t *src, void **priv)
 {
+	TODO("ENTER %s", TODOENTRY(entry));
 	if (entry->iv_class->iv_class_id == IV_POOL_CONN) {
+		TODO("FETCH CONN");
 		struct pool_iv_entry *src_iv = src->sg_iovs[0].iov_buf;
 		struct pool_iv_entry *dst_iv = dst->sg_iovs[0].iov_buf;
 		/* TODO: src_len will come from elsewhere */
@@ -377,6 +391,10 @@ pool_iv_ent_fetch(struct ds_iv_entry *entry, struct ds_iv_key *key,
 		d_iov_t iov;
 		/* TODO: This returns -DER_NOTLEADER for some reason? */
 		rc = ds_pool_get_open_handles(dst_iv->piv_pool_uuid, &iov);
+		TODO("Got handle buf rc="DF_RC" size=%zu", DP_RC(rc), iov.iov_buf_len);
+
+		TODO("src_len: %lu", src_len);
+		TODO("dst_len: %lu", dst_len);
 
 		D_DEBUG(DB_MD, "pool "DF_UUID" map ver %d\n",
 			DP_UUID(dst_iv->piv_pool_uuid),
@@ -399,6 +417,7 @@ pool_iv_ent_update(struct ds_iv_entry *entry, struct ds_iv_key *key,
 	struct ds_pool		*pool;
 	d_rank_t		rank;
 	int			rc;
+	TODO("ENTER %s", TODOENTRY(entry));
 
 	pool = ds_pool_lookup(src_iv->piv_pool_uuid);
 	if (pool == NULL)
@@ -442,6 +461,7 @@ pool_iv_ent_refresh(struct ds_iv_entry *entry, struct ds_iv_key *key,
 	struct pool_iv_entry	*src_iv;
 	struct ds_pool		*pool;
 	int			rc;
+	TODO("ENTER %s", TODOENTRY(entry));
 
 	if (src == NULL) /* invalidate */
 		return 0;
@@ -478,6 +498,7 @@ pool_iv_ent_refresh(struct ds_iv_entry *entry, struct ds_iv_key *key,
 static bool
 pool_iv_ent_valid(struct ds_iv_entry *entry, struct ds_iv_key *key)
 {
+	TODO("ENTER %s", TODOENTRY(entry));
 	/* Only the leader returns true (valid entry) for open connection
 	 * handles fetch requests
 	 */
@@ -490,6 +511,7 @@ pool_iv_ent_valid(struct ds_iv_entry *entry, struct ds_iv_key *key)
 static int
 pool_iv_value_alloc(struct ds_iv_entry *entry, d_sg_list_t *sgl)
 {
+	TODO("ENTER %s", TODOENTRY(entry));
 	return pool_iv_value_alloc_internal(&entry->iv_key, sgl);
 }
 
@@ -501,6 +523,7 @@ pool_iv_pre_sync(struct ds_iv_entry *entry, struct ds_iv_key *key,
 	struct ds_pool		*pool;
 	struct pool_buf		*map_buf = NULL;
 	int			 rc;
+	TODO("ENTER %s", TODOENTRY(entry));
 
 	/* This function is only for IV_POOL_MAP. */
 	if (entry->iv_class->iv_class_id != IV_POOL_MAP)
@@ -699,6 +722,8 @@ pool_iv_hdl_fetch_all(void *ns)
 	struct pool_iv_key	*pool_key;
 	int			rc;
 
+	TODO("ENTER");
+
 	/* For the initial request, provide an initial buffer that is much
 	 * too small to discover how much size is actually needed
 	 *
@@ -720,6 +745,8 @@ pool_iv_hdl_fetch_all(void *ns)
 	rc = ds_iv_fetch(ns, &key, &sgl, false /* retry */);
 	if (rc)
 		D_ERROR("iv fetch failed "DF_RC"\n", DP_RC(rc));
+
+	TODO("EXIT rc="DF_RC, DP_RC(rc));
 
 	return rc;
 }
