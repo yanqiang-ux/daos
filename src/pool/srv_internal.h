@@ -160,6 +160,7 @@ uint32_t pool_iv_map_ent_size(int nr);
 int ds_pool_iv_init(void);
 int ds_pool_iv_fini(void);
 int pool_iv_map_fetch(void *ns, struct pool_iv_entry *pool_iv);
+int pool_iv_hdl_fetch_all(void *ns);
 void ds_pool_map_refresh_ult(void *arg);
 
 int ds_pool_iv_hdl_update(struct ds_pool *pool, uuid_t hdl_uuid,

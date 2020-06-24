@@ -2750,6 +2750,49 @@ out:
 	return rc;
 }
 
+
+static int
+poke_node_to_fetch_handles(uuid_t pool_uuid, d_rank_t rank)
+{
+	crt_rpc_t			*tf_req;
+	struct pool_tgt_fetch_hdls_in	*tf_in;
+	struct pool_tgt_fetch_hdls_out	*tf_out;
+	crt_opcode_t			opc;
+	crt_endpoint_t			svr_ep;
+	int				rc = DER_SUCCESS;
+
+	svr_ep.ep_grp = NULL;
+	svr_ep.ep_rank = rank;
+	svr_ep.ep_tag = daos_rpc_tag(DAOS_REQ_POOL, 0);
+	opc = DAOS_RPC_OPCODE(POOL_TGT_FETCH_HDLS, DAOS_POOL_MODULE, 1);
+	rc = crt_req_create(dss_get_module_info()->dmi_ctx, &svr_ep, opc, &tf_req);
+	if (rc != 0) {
+		D_ERROR("crt_req_create(MGMT_SVC_RIP) failed, rc: "DF_RC".\n",
+			DP_RC(rc));
+		return rc;
+	}
+
+	tf_in = crt_req_get(tf_req);
+	D_ASSERT(tf_in != NULL);
+	uuid_copy(tf_in->tfi_pool_uuid, pool_uuid);
+
+	rc = dss_rpc_send(tf_req);
+	if (rc != 0) {
+		crt_req_decref(tf_req);
+		return rc;
+	}
+
+	tf_out = crt_reply_get(tf_req);
+	rc = tf_out->tfo_rc;
+	if (rc != 0) {
+		crt_req_decref(tf_req);
+		D_ERROR(DF_UUID": failed to send handle uuids to ranks "
+			DF_RC"\n", DP_UUID(pool_uuid), DP_RC(rc));
+		return rc;
+	}
+
+	return rc;
+}
 /**
  * Query the pool without holding a pool handle.
  *
@@ -2783,6 +2826,13 @@ ds_pool_svc_query(uuid_t pool_uuid, d_rank_list_t *ranks,
 	rc = rsvc_client_init(&client, ranks);
 	if (rc != 0)
 		D_GOTO(out, rc);
+
+	/* Use query to trigger the target node to fetch handles via IV
+	 * TODO: Remove this entire RPC, it is convenient for testing only
+	 */
+	rc = poke_node_to_fetch_handles(pool_uuid, 3);
+	if (rc)
+		D_PRINT("redist_open_hdls fails rc: "DF_RC"\n", DP_RC(rc));
 
 rechoose:
 	ep.ep_grp = NULL; /* primary group */
@@ -3775,48 +3825,6 @@ out:
 	return rc;
 }
 
-static int
-redist_open_hdls_send_rpcs(uuid_t pool_uuid, d_iov_t *handles,
-			   d_rank_list_t *ranks)
-{
-	crt_rpc_t			*tf_req;
-	struct pool_tgt_fetch_hdls_in	*tf_in;
-	struct pool_tgt_fetch_hdls_out	*tf_out;
-	crt_opcode_t			opc;
-	int				topo;
-	int				rc;
-
-	/* Collective RPC to destroy the pool on all of targets */
-	topo = crt_tree_topo(CRT_TREE_KNOMIAL, 4);
-	opc = DAOS_RPC_OPCODE(POOL_TGT_FETCH_HDLS, DAOS_POOL_MODULE, 1);
-	rc = crt_corpc_req_create(dss_get_module_info()->dmi_ctx,
-				  NULL, ranks, opc, NULL, NULL,
-				  0, topo, &tf_req);
-	if (rc != 0) {
-		D_ERROR("crt_corpc_req_create failed, rc: "DF_RC".\n",
-			DP_RC(rc));
-		return rc;
-	}
-
-	tf_in = crt_req_get(tf_req);
-	D_ASSERT(tf_in != NULL);
-	uuid_copy(tf_in->tfi_pool_uuid, pool_uuid);
-	d_iov_set(&tf_in->tfi_hdls, handles->iov_buf, handles->iov_buf_len);
-
-	rc = dss_rpc_send(tf_req);
-	if (rc != 0)
-		D_GOTO(out_rpc, rc);
-
-	tf_out = crt_reply_get(tf_req);
-	rc = tf_out->tfo_rc;
-	if (rc != 0)
-		D_ERROR(DF_UUID": failed to send handle uuids to ranks "
-			DF_RC"\n", DP_UUID(pool_uuid), DP_RC(rc));
-out_rpc:
-	crt_req_decref(tf_req);
-
-	return rc;
-}
 
 struct redist_open_hdls_arg {
 	/**
@@ -3994,25 +4002,6 @@ out_lock:
 
 out_svc:
 	pool_svc_put_leader(svc);
-	return rc;
-}
-
-static int
-redist_open_hdls(uuid_t pool_uuid, d_rank_list_t *ranks)
-{
-	d_iov_t hdls;
-	int rc;
-
-	rc = ds_pool_get_open_handles(pool_uuid, &hdls);
-	if (rc != 0)
-		return rc;
-
-	rc = redist_open_hdls_send_rpcs(pool_uuid, &hdls, ranks);
-	if (rc != 0)
-		D_GOTO(out_free, rc);
-
-out_free:
-	D_FREE(hdls.iov_buf);
 
 	return rc;
 }
@@ -4036,36 +4025,6 @@ ds_pool_tgt_add_in(uuid_t pool_uuid, struct pool_target_id_list *list)
 {
 	return ds_pool_update_internal(pool_uuid, list, POOL_ADD_IN,
 				       NULL, NULL, NULL, false);
-}
-
-/**
- * Allocates and returns a list of unique ranks based on the input target list.
- *
- * Caller must free output list
- *
- * \param in[IN]   Input list to synthesize
- * \param out[OUT] Unique output list. Will be set to NULL if allocation failed
- */
-static void
-addr_list_to_rank_list(struct pool_target_addr_list *in, d_rank_list_t **out)
-{
-	d_rank_list_t *tmplist;
-	int i;
-
-	*out = NULL;
-
-	tmplist = d_rank_list_alloc(in->pta_number);
-	if (tmplist == NULL)
-		return;
-
-	for (i = 0; i < in->pta_number; i++)
-		tmplist->rl_ranks[i] = in->pta_addrs[i].pta_rank;
-
-	/* Make sure the list is unique, some targets might share ranks */
-	d_rank_list_dup_sort_uniq(out, tmplist);
-
-	/* Free the intermediate list */
-	d_rank_list_free(tmplist);
 }
 
 /*
@@ -4101,24 +4060,6 @@ ds_pool_update(uuid_t pool_uuid, crt_opcode_t opc,
 
 	if (!updated || !(opc == POOL_EXCLUDE || opc == POOL_ADD))
 		D_GOTO(out, rc);
-
-	/* If adding or reintegrating a node, redistribute any existing open
-	 * handles to that node prior to starting the rebuild/migration process
-	 */
-	if (opc == POOL_ADD) {
-		d_rank_list_t *ranks;
-		addr_list_to_rank_list(list, &ranks);
-		if (ranks == NULL)
-			D_GOTO(out, rc);
-
-		rc = redist_open_hdls(pool_uuid, ranks);
-		d_rank_list_free(ranks);
-		if (rc) {
-			D_ERROR("redist_open_hdls fails rc: "DF_RC"\n",
-				DP_RC(rc));
-			D_GOTO(out, rc);
-		}
-	}
 
 	env = getenv(REBUILD_ENV);
 	if ((env && !strcasecmp(env, REBUILD_ENV_DISABLED)) ||

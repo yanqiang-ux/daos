@@ -364,6 +364,30 @@ static int
 pool_iv_ent_fetch(struct ds_iv_entry *entry, struct ds_iv_key *key,
 		  d_sg_list_t *dst, d_sg_list_t *src, void **priv)
 {
+	if (entry->iv_class->iv_class_id == IV_POOL_CONN) {
+		struct pool_iv_entry *src_iv = src->sg_iovs[0].iov_buf;
+		struct pool_iv_entry *dst_iv = dst->sg_iovs[0].iov_buf;
+		/* TODO: src_len will come from elsewhere */
+		uint64_t src_len = sizeof(struct pool_iv_conn) +
+			src_iv->piv_conn.pic_cred_size;
+		uint64_t dst_len = dst->sg_iovs[0].iov_buf_len -
+			sizeof(*dst_iv);
+		int rc;
+
+		d_iov_t iov;
+		/* TODO: This returns -DER_NOTLEADER for some reason? */
+		rc = ds_pool_get_open_handles(dst_iv->piv_pool_uuid, &iov);
+
+		D_DEBUG(DB_MD, "pool "DF_UUID" map ver %d\n",
+			DP_UUID(dst_iv->piv_pool_uuid),
+			dst_iv->piv_pool_map_ver);
+
+		if (dst_len < src_len) {
+			D_ERROR("dst %lu\n src %lu\n", dst_len, src_len);
+			/* TODO: Indicate the size somehow? */
+			return -DER_REC2BIG;
+		}
+	}
 	return pool_iv_ent_copy(entry->iv_class->iv_class_id, dst, src);
 }
 
@@ -451,6 +475,18 @@ pool_iv_ent_refresh(struct ds_iv_entry *entry, struct ds_iv_key *key,
 	return rc;
 }
 
+static bool
+pool_iv_ent_valid(struct ds_iv_entry *entry, struct ds_iv_key *key)
+{
+	/* Only the leader returns true (valid entry) for open connection
+	 * handles fetch requests
+	 */
+	if (entry->iv_class->iv_class_id == IV_POOL_CONN)
+		return dss_self_rank() == entry->ns->iv_master_rank;
+
+	return true;
+}
+
 static int
 pool_iv_value_alloc(struct ds_iv_entry *entry, d_sg_list_t *sgl)
 {
@@ -485,6 +521,11 @@ pool_iv_pre_sync(struct ds_iv_entry *entry, struct ds_iv_key *key,
 
 	rc = ds_pool_tgt_map_update(pool, map_buf, v->piv_pool_map_ver);
 
+	/* TODO - Put something here to fetch the handles? ABT Thread?
+	 * Needs something to stop it from running all the time
+	 */
+	//pool_iv_hdl_fetch_all(entry->ns);
+
 	ds_pool_put(pool);
 	return rc;
 }
@@ -497,6 +538,7 @@ struct ds_iv_class_ops pool_iv_ops = {
 	.ivc_ent_fetch		= pool_iv_ent_fetch,
 	.ivc_ent_update		= pool_iv_ent_update,
 	.ivc_ent_refresh	= pool_iv_ent_refresh,
+	.ivc_ent_valid		= pool_iv_ent_valid,
 	.ivc_value_alloc	= pool_iv_value_alloc,
 	.ivc_pre_sync		= pool_iv_pre_sync
 };
@@ -636,6 +678,49 @@ ds_pool_iv_hdl_update(struct ds_pool *pool, uuid_t hdl_uuid, uint64_t flags,
 	D_DEBUG(DB_MD, DF_UUID" distribute hdl "DF_UUID" capas "DF_U64" %d\n",
 		DP_UUID(pool->sp_uuid), DP_UUID(hdl_uuid), sec_capas, rc);
 	D_FREE(iv_entry);
+	return rc;
+}
+
+/**
+ * Triggers a fetch of all existing pool open handles
+ * The handles are not returned here - see pool_iv_ent_refresh()
+ *
+ * \param ns [IN]       pool iv namespace
+ *
+ * \return              0 if succeeds, error code otherwise.
+ */
+int
+pool_iv_hdl_fetch_all(void *ns)
+{
+	d_sg_list_t		sgl = { 0 };
+	d_iov_t			iov;
+	uint64_t		initial_buf = 0;
+	struct ds_iv_key	key;
+	struct pool_iv_key	*pool_key;
+	int			rc;
+
+	/* For the initial request, provide an initial buffer that is much
+	 * too small to discover how much size is actually needed
+	 *
+	 * The needed size will be returned here along with the -ETOOBIG error
+	 *
+	 * Then the correct size buffer can be allocated and the request
+	 * repeated
+	 */
+	sgl.sg_nr = 1;
+	sgl.sg_nr_out = 0;
+	sgl.sg_iovs = &iov;
+
+	d_iov_set(&iov, &initial_buf, sizeof(initial_buf));
+
+	memset(&key, 0, sizeof(key));
+	key.class_id = IV_POOL_CONN;
+	pool_key = (struct pool_iv_key *)key.key_buf;
+	pool_key->pik_entry_size = sizeof(initial_buf) - 1;
+	rc = ds_iv_fetch(ns, &key, &sgl, false /* retry */);
+	if (rc)
+		D_ERROR("iv fetch failed "DF_RC"\n", DP_RC(rc));
+
 	return rc;
 }
 

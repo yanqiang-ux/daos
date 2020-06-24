@@ -1035,7 +1035,6 @@ ds_pool_tgt_fetch_hdls_handler(crt_rpc_t *rpc)
 	struct pool_tgt_fetch_hdls_out	*out = crt_reply_get(rpc);
 	struct ds_pool			*pool;
 	int				 rc = DER_SUCCESS;
-	struct pool_iv_conn		*conn;
 
 	D_DEBUG(DF_DSMS, DF_UUID": processing rpc",
 		DP_UUID(in->tfi_pool_uuid));
@@ -1047,30 +1046,11 @@ ds_pool_tgt_fetch_hdls_handler(crt_rpc_t *rpc)
 		D_GOTO(out, rc = -DER_NONEXIST);
 	}
 
-	conn = in->tfi_hdls.iov_buf;
-
-	/* This while loop check first checks that there is room in the buffer
-	 * for the struct itself (not including the variable length creds field)
-	 * If there is room, it reaches into the buffer to get the size of the
-	 * creds field and repeats the check to ensure there is room
-	 */
-	while (((char *)conn - (char *)in->tfi_hdls.iov_buf +
-		sizeof(struct pool_iv_conn) <= in->tfi_hdls.iov_buf_len) &&
-	       ((char *)conn - (char *)in->tfi_hdls.iov_buf +
-		sizeof(struct pool_iv_conn) +
-		conn->pic_cred_size <= in->tfi_hdls.iov_buf_len)) {
-
-		rc = ds_pool_tgt_connect(pool, conn);
-		if (rc != 0) {
-			D_ERROR(DF_UUID": ds_pool_tgt_connect failed rc="DF_RC
-				"\n", DP_UUID(pool->sp_uuid), DP_RC(rc));
-			D_GOTO(out, rc);
-		}
-
-		/* Shift the conn pointer to the next potential entry */
-		conn = (struct pool_iv_conn *)(((char *)conn) +
-					       sizeof(struct pool_iv_conn) +
-					       conn->pic_cred_size);
+	rc = pool_iv_hdl_fetch_all(pool->sp_iv_ns);
+	if (rc) {
+		D_ERROR("Fetch all failed for pool "DF_UUID", rc="DF_RC"\n",
+			DP_UUID(in->tfi_pool_uuid), DP_RC(rc));
+		D_GOTO(out, rc);
 	}
 
 out:
