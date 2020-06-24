@@ -58,7 +58,10 @@ class DmgCommand(YamlCommand):
                       r",\s+max:([0-9.]+\s+[A-Z]+),\s+mean:([0-9.]+\s+[A-Z]+))"
                       r"|Rebuild\s+\w+,\s+([0-9]+)\s+objs,\s+([0-9]+)"
                       r"\s+recs)",
-        "pool_get_acl": r"^(?!#).+$",
+        "pool_get_acl": r"(.+:.+:.+)",
+        "pool_update_acl": r"(.+:.+:.+)",
+        "pool_overwrite_acl": r"(.+:.+:.+)",
+        "pool_delete_acl": r"(.+:.+:.+)",
     }
 
     def __init__(self, path, yaml_cfg=None):
@@ -712,13 +715,13 @@ class DmgCommand(YamlCommand):
         self.sub_command_class.sub_command_class.pool.value = pool
         return self._get_result()
 
-    def pool_update_acl(self, pool, acl_file, entry):
+    def pool_update_acl(self, pool, entry, acl_file=None):
         """Update the acl for a given pool.
 
         Args:
             pool (str): Pool for which to update the ACL.
+            entry (str, optional): entry to be updated
             acl_file (str): ACL file to update
-            entry (str): entry to be updated
 
         Returns:
             CmdResult: Object that contains exit status, stdout, and other
@@ -757,7 +760,7 @@ class DmgCommand(YamlCommand):
         return self._get_result()
 
     def pool_delete_acl(self, pool, principal):
-        """Delete the acl for a given pool.
+        """Delete an ACL entry for a given pool.
 
         Args:
             pool (str): Pool for which to delete the ACL.

@@ -292,6 +292,10 @@ class TestContainer(TestDaosApiBase):
         self.written_data = []
 
         self.supported_control_methods = (self.USE_API, self.USE_DAOS)
+        if self.control_method.value == self.USE_DAOS:
+            self.control_object = self.daos
+        else:
+            self.control_object = self.container
 
     def __str__(self):
         """Return a string representation of this TestContainer object.
@@ -347,6 +351,9 @@ class TestContainer(TestDaosApiBase):
             "properties": self.properties.value,
             "acl_file": acl_file,
         }
+
+        # Execute
+        self._run("create", api_kwargs, "pool_create", daos_kwargs)
 
         if self.control_method.value == self.USE_API:
             # Create a container with the API method

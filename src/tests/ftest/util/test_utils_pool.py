@@ -28,7 +28,7 @@ import ctypes
 from test_utils_base import TestDaosApiBase
 
 from avocado import fail_on
-from avocado.utils import process
+from avocado.utils import process.CmdResult
 from command_utils import BasicParameter, CommandFailure
 from pydaos.raw import (DaosApiError, DaosServer, DaosPool, c_uuid_to_str,
                         daos_cref)
@@ -83,6 +83,10 @@ class TestPool(TestDaosApiBase):
         self.connected = False
 
         self.supported_control_methods = (self.USE_API, self.USE_DMG)
+        if self.control_method.value == self.USE_DMG:
+            self.control_object = self.dmg
+        else:
+            self.control_object = self.pool
 
     @fail_on(CommandFailure)
     @fail_on(DaosApiError)
@@ -137,7 +141,7 @@ class TestPool(TestDaosApiBase):
         # Execute
         self._run("create", api_kwargs, "pool_create", cmd_kwargs)
 
-        if isinstance(self.cmd_result, process.CmdResult):
+        if self.cmd_result and isinstance(self.cmd_result, CmdResult):
             # self.cmd_output to keep the actual stdout of dmg command for
             # checking the negative/warning message.
             self.cmd_output = self.cmd_result.stdout
@@ -206,6 +210,8 @@ class TestPool(TestDaosApiBase):
             return True
         return False
 
+    @fail_on(CommandFailure)
+    @fail_on(DaosApiError)
     def destroy(self, force=1):
         """Destroy the pool with either API or dmg.
 
@@ -226,8 +232,8 @@ class TestPool(TestDaosApiBase):
             if self.pool.attached:
                 self.log.info("Destroying pool %s", self.uuid)
                 kwargs = {"force": force, "pool": self.uuid}
-                status = self._run(
-                    "destroy", kwargs.items()[0], "pool_destroy", kwargs)
+                self._run("destroy", {"force": force}, "pool_destroy", kwargs)
+                status = True
 
             self.pool = None
             self.uuid = None
@@ -268,19 +274,52 @@ class TestPool(TestDaosApiBase):
         """Query the pool for ACL information."""
         acl_out = []
         if self.pool:
-            self.log.info("Get-acl for pool: %s", self.uuid)
-
-            if self.control_method.value == self.USE_DMG and self.dmg:
-                acl_out = self.dmg.get_output("pool_get_acl", 8, pool=self.uuid)
+            self._run(dmg_method="pool_get_acl", dmg_kw={"pool": self.uuid})
+            if self.cmd_result and isinstance(self.cmd_result, CmdResult):
+                acl_out = self.dmg.parse_output(
+                    "pool_get_acl", self.cmd_result.stdout, 8)
+                # Add entries into ACL object
                 for entry in acl_out:
-                    self.acl.str_to_entry(entry)
-            elif self.control_method.value == self.USE_DMG:
-                self.log.error("Error: Undefined dmg command")
-            else:
-                self.log.error(
-                    "Error: Undefined control_method: %s",
-                    self.control_method.value)
+                    self.acl.entry_import(entry)
         return acl_out
+
+    @fail_on(CommandFailure)
+    def delete_acl(self, principal):
+        """Delete ACL entry for a given pool.
+
+        Args:
+            principal (str): the identity or the user/group to be removed from
+                ACL.
+        """
+        if self.pool:
+            if "@" not in principal:
+                f_principal = principal + "@"
+            kwargs = {"pool": self.uuid, "principal": f_principal}
+            self._run(dmg_method="pool_delete_acl", dmg_kw=kwargs)
+
+    @fail_on(CommandFailure)
+    def update_acl(self, entry, acl_file=None):
+        """Update entries in a DAOS pool's ACL
+
+        Args:
+            entry (str, optional): entry to be updated
+            acl_file (str): ACL file to update
+        """
+        if self.pool:
+            kwargs = {"pool": self.uuid, "entry": entry, "acl_file": acl_file}
+            self._run(dmg_method="pool_update_acl", dmg_kw=kwargs)
+
+    @fail_on(CommandFailure)
+    def overwrite_acl(self, acl_file):
+        """Overwrite the acl for pool.
+
+        Args:
+            acl_file (str): ACL file to update
+        """
+        if self.pool:
+            kwargs = {"pool": self.uuid, "acl_file": acl_file}
+            self._run(dmg_method="pool_update_acl", dmg_kw=kwargs)
+
 
     def check_pool_info(self, pi_uuid=None, pi_ntargets=None, pi_nnodes=None,
                         pi_ndisabled=None, pi_map_ver=None, pi_leader=None,

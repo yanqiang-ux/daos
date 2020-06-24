@@ -25,7 +25,7 @@
 import os
 from logging import getLogger
 from logger_utils import TestLogger
-from general_utils import write_remote_file
+from general_utils import write_file
 
 
 class ACE(object):
@@ -55,7 +55,7 @@ class ACE(object):
         """
         self.acl_type = acl_type.upper()
         self.flags = flags.upper()
-        self.principal = principal
+        self.principal = principal if "@" in principal else principal + "@"
 
         if permissions and not isinstance(permissions, set):
             self.permissions = set(permissions)
@@ -71,11 +71,6 @@ class ACE(object):
             str: the string version of the ACE values.
 
         """
-        # Add correct format
-        tmp_principal = self.principal
-        if "@" not in self.principal:
-            tmp_principal = self.principal + "@"
-
         return "{}:{}:{}:{}".format(
             self.acl_type,
             self.flags,
@@ -89,7 +84,26 @@ class ACE(object):
             str: the representation string for the ACE.
 
         """
-        return "ACL Entry: {}".format(self.__str__())
+        return "ACL Entry: \n{}".format(self.__str__())
+
+    def update(self, field, value):
+        """Update entries field with provided value.
+
+        Args:
+            field (str): field within an entry to update.
+                i.e. type, flags, principal, permissions
+            value (str): value used to update provided field.
+        """
+        if field in self.__dict__:
+            if field == "permissions":
+                if not isinstance(value, set):
+                    self.permissions = set(value)
+                else:
+                    self.permissions = value
+            else:
+                setattr(self, field, value)
+        else:
+            raise KeyError("No entry field named: {}".format(field))
 
     def grant_permission(self, permission):
         """Grant permissions to this entry.
@@ -141,71 +155,52 @@ class ACL(object):
         """
         return "{}".format("\n".join(self.entries.values()))
 
-    def str_to_entry(self, stdout):
+    def entry_import(self, stdout):
         """Import ACL information from a provided ACL stdout string.
 
         Args:
             stdout (str): string containing ACL information to be imported.
         """
-        for key, entry in enumerate(stdout.splitlines()):
+        for entry in stdout.splitlines():
             if not entry.startswith("#"):
                 e_type, flags, princ, perm = entry.split(":")
-            self.entries[key] = ACE(e_type, flags, princ, set(perm))
+                self.entries[princ] = ACE(e_type, flags, princ, perm)
 
-    def add(self, key, entry):
-        """Add entry to ACL.
-
-        Args:
-            key (str): identifier for ACE to be added.
-            entry (ACE object): new access control entry.
-
-        Returns:
-            dict: dictionary containing entries in ACL.
-
-        """
-        if key in self.entries:
-
-            self.entries[key].add(entry)
-        else:
-            self.entries[key] = set(self.entries)
-
-    def remove(self, key):
+    def delete(self, key):
         """Remove an entry from ACL.
 
         Args:
             key (str): identifier for ACE to be removed.
 
+        Raises:
+            KeyError: if key is not found in ACL entries.
         """
         if key in self.entries:
-            for
+            self.entries.pop(key)
+        else:
+            raise KeyError("No entry found with '{}' key".format(key))
 
-    def overwrite(self, key, entry):
+    def overwrite(self, acl_info):
         """Overwrtie an existing ACL entry with a new entry.
 
         Args:
-            key (str): key to identify which entry will be overwritten.
-            entry (ACE object): new entry object.
-
-        Raises:
-            KeyError:
+            acl_info (str): acl file information that will be used to ovewrite
+                current acl entries.
         """
-        if key in self.entries:
-            self.entries[key] = entry
-        else:
-            raise KeyError
+        for line in acl_info:
 
-    def update(self, key, field, value):
+
+    def update(self, key, entry):
         """Update ACL with provided entries.
 
         Args:
             key (str): key to identify which entry will be updated.
-            field (str): field within an entry to update.
-                i.e. type, flags, principal, permissions
-            value (str): value used to update provided field.
+            entry (ACE object):
         """
+        self.entries[key] = entry
 
-    def delete(self):
-        """Reset ACL object and clear all entries."""
+    def clear(self):
+        """Clear all ACL entries."""
         self.entries.clear()
 
     def update_file(self, hosts=None):
@@ -217,5 +212,4 @@ class ACL(object):
             hosts (str, optional): list of hosts, if not hosts provided,
                 file will be updated locally.
         """
-        return write_remote_file(
-            hosts, self.file, "\n".join(self.entries.values()))
+        return write_file(hosts, self.file, "\n".join(self.entries.values()))

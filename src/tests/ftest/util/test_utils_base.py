@@ -136,8 +136,8 @@ class TestDaosApiBase(ObjectWithParameters):
                 self.control_method.value, self.supported_control_methods))
 
         if self.control_method.value == self.USE_API:
-            self._call_method(getattr(self.pool, api_method), **api_kwargs)
-
+            self._call_method(
+                getattr(self.control_object, api_method), **api_kwargs)
         elif self.control_object is not None:
             self.log.info(
                 "Running: %s with: %s", cmd_method, self.control_method.value)
