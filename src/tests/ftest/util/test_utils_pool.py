@@ -242,19 +242,25 @@ class TestPool(TestDaosApiBase):
 
         return status
 
-    def set_property(self):
+    @fail_on(CommandFailure)
+    def set_property(self, prop_name=None, prop_value=None):
         """Set Property.
 
         It sets property for a given pool uuid using
         dmg.
 
+        Args:
+            prop_name (str, optional): pool property name. Defaults to
+                None.
+            prop_value (str, optional): value to be set for the property.
+                Defaults to None.
         """
         if self.pool:
             self.log.info("Set-prop for Pool: %s", self.uuid)
             kwargs = {
                 "pool": self.uuid,
-                "name": self.prop_name,
-                "value": self.prop_value
+                "name": prop_name if prop_name else self.prop_name,
+                "value": prop_value if prop_value else self.prop_value
             }
             self._run(dmg_method="pool_set_prop", dmg_kw=kwargs)
 

@@ -223,6 +223,23 @@ class ExecutableCommand(CommandWithParameters):
             self.log.info("%s stopped successfully", self.command)
             self._process = None
 
+    def wait(self):
+        """Wait for the sub process to complete.
+
+        Returns:
+            int: return code of process
+
+        """
+        retcode = 0
+        if self._process is not None:
+            try:
+                retcode = self._process.wait()
+            except OSError as error:
+                self.log.error("Error while waiting %s", error)
+                retcode = 255
+
+        return retcode
+
     def get_subprocess_state(self, message=None):
         """Display the state of the subprocess.
 
@@ -249,7 +266,7 @@ class ExecutableCommand(CommandWithParameters):
                 r"\d+\s+([DRSTtWXZ<NLsl+]+)\s+\d+", result.stdout)
         return state
 
-    def get_output(self, method_name, **kwargs):
+    def get_output(self, method_name, regex_method=None, **kwargs):
         """Get output from the command issued by the specified method.
 
         Issue the specified method and return a list of strings that result from
@@ -279,25 +296,32 @@ class ExecutableCommand(CommandWithParameters):
         if not isinstance(result, process.CmdResult):
             raise CommandFailure(
                 "{}() did not return a CmdResult".format(method_name))
-        return self.parse_output(method_name, result.stdout)
 
-    def parse_output(self, method_name, stdout):
-        """Parse
+        # Parse the output and return
+        if not regex_method:
+            regex_method = method_name
+        return self.parse_output(result.stdout, regex_method)
+
+    def parse_output(self, stdout, regex_method):
+        """Parse output using findall() with supplied 'regex_method' as pattern.
 
         Args:
-            method_name (str): name of the method to execute
-            stdout (str): string to parse.
+            stdout (str): output to parse
+            regex_method (str): name of the method regex to use
+
+        Raises:
+            CommandFailure: if there is an error finding the method's regex
+                pattern.
 
         Returns:
             list: a list of strings obtained from the method's output parsed
-                through its regex.
-
+                through its regex
+                
         """
-        if method_name not in self.METHOD_REGEX:
+        if regex_method not in self.METHOD_REGEX:
             raise CommandFailure(
-                "No pattern regex defined for '{}()'".format(method_name))
-
-        return re.findall(self.METHOD_REGEX[method_name], stdout)
+                "No pattern regex defined for '{}()'".format(regex_method))
+        return re.findall(self.METHOD_REGEX[regex_method], stdout)
 
     def get_environment(self, manager, log_file=None):
         """Get the environment variables to export for the command.
