@@ -2627,6 +2627,7 @@ out:
 void
 ds_pool_query_handler(crt_rpc_t *rpc)
 {
+	D_PRINT("[RYON] %s:%d [%s()] > \n", __FILE__, __LINE__, __FUNCTION__);
 	struct pool_query_in   *in = crt_req_get(rpc);
 	struct pool_query_out  *out = crt_reply_get(rpc);
 	daos_prop_t	       *prop = NULL;
@@ -2792,7 +2793,6 @@ out:
 	D_DEBUG(DF_DSMS, DF_UUID": replying rpc %p: "DF_RC"\n",
 		DP_UUID(in->pqi_op.pi_uuid), rpc, DP_RC(rc));
 	crt_reply_send(rpc);
-	daos_prop_free(prop);
 }
 
 static int
@@ -4984,6 +4984,7 @@ is_pool_from_srv(uuid_t pool_uuid, uuid_t poh_uuid)
 	}
 
 	rc = ds_pool_iv_srv_hdl_fetch(pool, &hdl_uuid, NULL);
+	ds_pool_put(pool);
 	if (rc) {
 		D_ERROR(DF_UUID" fetch srv hdl: %d\n", DP_UUID(pool_uuid), rc);
 		return false;
