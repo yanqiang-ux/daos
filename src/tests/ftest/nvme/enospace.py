@@ -83,6 +83,92 @@ class NvmeEnospace(ServerFillUp):
             self.fail('Expected DER_NOSPACE should be {} and Found {}'
                       .format(der_nospace_err_count, der_nospace_count))
 
+    def run_enospace(self):
+        """
+        Function to run test and validate DER_ENOSPACE and expected size.
+        """
+        #Fill 75% of SCM pool, Aggregation is Enabled so one point of time, data
+        #will be aggregated from SCM and moved to NVMe
+        self.start_ior_load(storage='SCM', precent=75)
+        print(self.pool.pool_percentage_used())
+
+        #Fill 75% more of SCM pool,Aggregation is Enabled so NVMe space will be
+        #filled
+        self.start_ior_load(storage='SCM', precent=75)
+        print(self.pool.pool_percentage_used())
+
+        #Fill 60% more of SCM pool, So now NVMe is Full so data will not be
+        #moved to NVMe but it will fill the SCM.
+        try:
+            #Fill 60% more to SCM ,which should Fail because no SCM space
+            self.start_ior_load(storage='SCM', precent=60)
+            self.fail('This test suppose to because of DER_NOSPACE'
+                      'but it got Passed')
+        except TestFail as _error:
+            self.log.info('Test expected to fail because of DER_NOSPACE')
+
+        #verify the DER_NO_SAPCE error count is expected and no other Error in
+        #client log
+        self.verify_enspace_log()
+
+        #Check that both NVMe and SCM are full.
+        pool_usage = self.pool.pool_percentage_used()
+        print(pool_usage)
+        for storage in pool_usage:
+            if pool_usage[storage] > 99:
+                self.fail('{} pool used percentage should be > 99, instead {}'.
+                          format(storage, pool_usage[storage]))
+
+    @skipForTicket("DAOS-4846")
+    def test_enospace_lazy_aggrgation(self):
+        """Jira ID: DAOS-4756.
+
+        Test Description: IO gets DER_NOSPACE when SCM and NVMe is full with
+                          default (lazy) Aggregation mode.
+
+        Use Case: This tests will create the pool. Fill 75% of SCM size which
+                  will trigger the aggregation because of space pressure,
+                  next fill 75% more which should fill NVMe. Try to fill 60%
+                  more and now SCM size will be full too.
+                  verify that last IO fails with DER_NOSPACE and SCM/NVMe pool
+                  capacity is full.
+
+        :avocado: tags=all,hw,medium,nvme,ib2,full_regression,der_enospace
+        :avocado: tags=enospc_lazy
+        """
+        self.create_pool_max_size()
+        print(self.pool.pool_percentage_used())
+
+        #Run IOR to fill the pool.
+        self.run_enospace()
+
+    #@skipForTicket("DAOS-5353")
+    def test_enospace_time_aggrgation(self):
+        """Jira ID: DAOS-4756.
+
+        Test Description: IO gets DER_NOSPACE when SCM is full and it release
+                          the size when container destroy with Aggregation
+                          set on time mode.
+
+        Use Case: This tests will create the pool. Set Aggregation mode to Time.
+                  Fill 75% of SCM size which will trigger the aggregation
+                  because based on time, next fill 75% more which should fill
+                  NVMe. Try to fill 60% more and now SCM size will be full too.
+                  verify that last IO fails with DER_NOSPACE and SCM/NVMe pool
+                  capacity is full.
+
+        :avocado: tags=all,hw,medium,nvme,ib2,full_regression,der_enospace
+        :avocado: tags=enospc_time
+        """
+        self.create_pool_max_size()
+        print(self.pool.pool_percentage_used())
+
+        # Enabled TIme mode for Aggregation.
+        self.pool.set_property("reclaim", "time")
+
+        #Run IOR to fill the pool.
+        self.run_enospace()
+
     @skipForTicket("DAOS-4846")
     def test_enospace_no_aggrgation(self):
         """Jira ID: DAOS-4756.
@@ -152,90 +238,3 @@ class NvmeEnospace(ServerFillUp):
 
         #Run last IO
         self.start_ior_load(storage='SCM', precent=1)
-
-    def run_enospace(self):
-        """
-        Function to run test and validate DER_ENOSPACE and expected size.
-        """
-        #Fill 75% of SCM pool, Aggregation is Enabled so one point of time, data
-        #will be aggregated from SCM and moved to NVMe
-        self.start_ior_load(storage='SCM', precent=75)
-        print(self.pool.pool_percentage_used())
-
-        #Fill 75% more of SCM pool,Aggregation is Enabled so NVMe space will be
-        #filled
-        self.start_ior_load(storage='SCM', precent=75)
-        print(self.pool.pool_percentage_used())
-
-        #Fill 60% more of SCM pool, So now NVMe is Full so data will not be
-        #moved to NVMe but it will fill the SCM.
-        try:
-            #Fill 60% more to SCM ,which should Fail because no SCM space
-            self.start_ior_load(storage='SCM', precent=60)
-            self.fail('This test suppose to because of DER_NOSPACE'
-                      'but it got Passed')
-        except TestFail as _error:
-            self.log.info('Test expected to fail because of DER_NOSPACE')
-
-        #verify the DER_NO_SAPCE error count is expected and no other Error in
-        #client log
-        self.verify_enspace_log()
-
-        #Check that both NVMe and SCM are full.
-        pool_usage = self.pool.pool_percentage_used()
-        print(pool_usage)
-        for storage in pool_usage:
-            if pool_usage[storage] > 99:
-                self.fail('{} pool used percentage should be > 99, instead {}'.
-                          format(storage, pool_usage[storage]))
-
-    @skipForTicket("DAOS-5353")
-    def test_enospace_lazy_aggrgation(self):
-        """Jira ID: DAOS-4756.
-
-        Test Description: IO gets DER_NOSPACE when SCM and NVMe is full with
-                          default (lazy) Aggregation mode.
-
-        Use Case: This tests will create the pool. Fill 75% of SCM size which
-                  will trigger the aggregation because of space pressure,
-                  next fill 75% more which should fill NVMe. Try to fill 60%
-                  more and now SCM size will be full too.
-                  verify that last IO fails with DER_NOSPACE and SCM/NVMe pool
-                  capacity is full.
-
-        :avocado: tags=all,hw,medium,nvme,ib2,full_regression,der_enospace
-        :avocado: tags=enospc_lazy
-        """
-        self.create_pool_max_size()
-        print(self.pool.pool_percentage_used())
-
-        #Run IOR to fill the pool.
-        self.run_enospace()
-
-    @skipForTicket("DAOS-5353")
-    def test_enospace_time_aggrgation(self):
-        """Jira ID: DAOS-4756.
-
-        Test Description: IO gets DER_NOSPACE when SCM is full and it release
-                          the size when container destroy with Aggregation
-                          set on time mode.
-
-        Use Case: This tests will create the pool. Set Aggregation mode to Time. 
-                  Fill 75% of SCM size which will trigger the aggregation
-                  because based on time, next fill 75% more which should fill
-                  NVMe. Try to fill 60% more and now SCM size will be full too.
-                  verify that last IO fails with DER_NOSPACE and SCM/NVMe pool
-                  capacity is full.
-
-        :avocado: tags=all,hw,medium,nvme,ib2,full_regression,der_enospace
-        :avocado: tags=enospc_time
-        """
-        self.create_pool_max_size()
-        print(self.pool.pool_percentage_used())
-
-        # Enabled TIme mode for Aggregation.
-        self.pool.set_property("reclaim", "time")
-
-        #Run IOR to fill the pool.
-        self.run_enospace()
-
