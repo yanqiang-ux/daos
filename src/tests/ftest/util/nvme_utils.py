@@ -96,9 +96,9 @@ class ServerFillUp(IorTestBase):
         # Start the servers and agents
         super(ServerFillUp, self).setUp()
         self.hostfile_clients = None
-        self.ior_read_flags = self.params.get("ior_read_flags",
+        self.ior_read_flags = self.params.get("read_flags",
                                               '/run/ior/iorflags/*',
-                                              '-F -r -R -G 1')
+                                              '-r -R -k -G 1')
         #Get the number of daos_io_servers
         self.daos_io_servers = (self.server_managers[0].manager
                                 .job.yaml.server_params)
@@ -377,16 +377,15 @@ class ServerFillUp(IorTestBase):
 
     def create_pool_max_size(self, scm=False, nvme=False):
         """
-        Method to create the single pool with Maximum NVMe size available.
+        Method to create the single pool with Maximum NVMe/SCM size available.
 
         arg:
             scm(bool): To create the pool with max SCM size or not.
             nvme(bool): To create the pool with max NVMe size or not.
 
         Note: Method to Fill up the server. It will get the maximum Storage
-              space and create the pool.Fill up the server based on % amount
-              given using IOR. Method to get the storage capacity.Replace with
-              dmg options in future when it's available.
+              space and create the pool.
+              Replace with dmg options in future when it's available.
         """
         # Create a pool
         self.pool = TestPool(self.context, dmg_command=self.get_dmg_command())
@@ -422,13 +421,14 @@ class ServerFillUp(IorTestBase):
         #Create the Pool
         self.pool.create()
 
-    def start_ior_load(self, storage='NVMe', precent=1):
+    def start_ior_load(self, storage='NVMe', operation="Write", precent=1):
         """
         Method to Fill up the server either SCM or NVMe.
         Fill up based on percent amount given using IOR.
 
         arg:
             storage(string): SCM or NVMe, by default it will fill NVMe.
+            operation(string): Write/Read operation
             precent(int): % of storage to be filled
 
         Returns:
@@ -439,10 +439,14 @@ class ServerFillUp(IorTestBase):
         self.nvme_fill = True if 'NVMe' in storage else False
         self.scm_fill = True if 'SCM' in storage else False
 
+        if operation not in ['Read', 'Write']:
+            self.fail('Please provide the valid IO operation instead {}'
+                      .format(operation))
+
         # Create the IOR threads
         job = threading.Thread(target=self.start_ior_thread,
                                kwargs={"results":self.out_queue,
-                                       "operation": 'Write'})
+                                       "operation": operation})
         # Launch the IOR thread
         job.start()
 

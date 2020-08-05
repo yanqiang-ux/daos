@@ -22,12 +22,25 @@
   portions thereof marked with this legend must also reproduce the markings.
 '''
 import time
+import threading
+import uuid
 
 from nvme_utils import ServerFillUp
 from avocado.core.exceptions import TestFail
 from general_utils import get_log_file, run_task
 from daos_utils import DaosCommand
 from apricot import skipForTicket
+from mpio_utils import MpioUtils
+from job_manager_utils import Mpirun
+from ior_utils import IorCommand
+from command_utils_base import CommandFailure
+
+try:
+    # python 3.x
+    import queue
+except ImportError:
+    # python 2.7
+    import Queue as queue
 
 class NvmeEnospace(ServerFillUp):
     # pylint: disable=too-many-ancestors
@@ -35,6 +48,20 @@ class NvmeEnospace(ServerFillUp):
     Test Class Description: To validate DER_NOSPACE for SCM and NVMe
     :avocado: recursive
     """
+
+    def __init__(self, *args, **kwargs):
+        """Initialize a NvmeEnospace object."""
+        super(NvmeEnospace, self).__init__(*args, **kwargs)
+        self.daos_cmd = None
+
+    def setUp(self):
+        super(NvmeEnospace, self).setUp()
+
+        # initialize daos_cmd
+        self.daos_cmd = DaosCommand(self.bin)
+        self.create_pool_max_size()
+        self.ior_bg_continue = True
+
     def der_enspace_log_count(self):
         """
         Function to count the DER_NOSPACE and other ERR in client log.
@@ -83,12 +110,64 @@ class NvmeEnospace(ServerFillUp):
             self.fail('Expected DER_NOSPACE should be {} and Found {}'
                       .format(der_nospace_err_count, der_nospace_count))
 
+    def ior_bg_thread(self, results):
+        """Start IOR Background thread, This will write small data set and
+        keep reading it in loop until it fails or main program exit.
+
+        Args:
+            results (queue): queue for returning thread results
+        """
+        con_uuid = str(uuid.uuid4())
+        mpio_util = MpioUtils()
+        if mpio_util.mpich_installed(self.hostlist_clients) is False:
+            self.fail("Exiting Test: Mpich not installed")
+
+        # Define the arguments for the ior_runner_thread method
+        ior_bg_cmd = IorCommand()
+        ior_bg_cmd.get_params(self)
+        ior_bg_cmd.set_daos_params(self.server_group, self.pool)
+        ior_bg_cmd.daos_oclass.update(self.ior_cmd.daos_oclass.value)
+        ior_bg_cmd.api.update(self.ior_cmd.api.value)
+        ior_bg_cmd.transfer_size.update(self.ior_cmd.transfer_size.value)
+        ior_bg_cmd.block_size.update(self.ior_cmd.block_size.value)
+        ior_bg_cmd.flags.update(self.ior_cmd.flags.value)
+
+        # Define the job manager for the IOR command
+        manager = Mpirun(ior_bg_cmd, mpitype="mpich")
+        manager.job.daos_cont.update(con_uuid)
+        env = ior_bg_cmd.get_default_env(str(manager))
+        manager.assign_hosts(self.hostlist_clients, self.workdir, None)
+        manager.assign_processes(1)
+        manager.assign_environment(env, True)
+        print('----Run IOR in Background-------')
+        # run IOR Write Command
+        try:
+            manager.run()
+        except CommandFailure as _error:
+            results.put("FAIL")
+
+        ior_bg_cmd.flags.update(self.ior_read_flags)
+        while self.ior_bg_continue:
+            try:
+                manager.run()
+            except CommandFailure as _error:
+                results.put("FAIL")
+                break
+
     def run_enospace(self):
         """
         Function to run test and validate DER_ENOSPACE and expected size.
         """
         #Fill 75% of SCM pool, Aggregation is Enabled so one point of time, data
         #will be aggregated from SCM and moved to NVMe
+
+        # Create the IOR Background thread
+        out_queue = queue.Queue()
+        job = threading.Thread(target=self.ior_bg_thread,
+                               kwargs={"results": out_queue})
+        job.start()
+
+        print('Starting main IOR load')
         self.start_ior_load(storage='SCM', precent=75)
         print(self.pool.pool_percentage_used())
 
@@ -105,6 +184,7 @@ class NvmeEnospace(ServerFillUp):
             self.fail('This test suppose to because of DER_NOSPACE'
                       'but it got Passed')
         except TestFail as _error:
+            self.ior_bg_continue = False
             self.log.info('Test expected to fail because of DER_NOSPACE')
 
         #verify the DER_NO_SAPCE error count is expected and no other Error in
@@ -116,10 +196,17 @@ class NvmeEnospace(ServerFillUp):
         print(pool_usage)
         for storage in pool_usage:
             if pool_usage[storage] > 99:
+                self.ior_bg_continue = False
                 self.fail('{} pool used percentage should be > 99, instead {}'.
                           format(storage, pool_usage[storage]))
 
-    @skipForTicket("DAOS-4846")
+        self.ior_bg_continue = False
+        # Verify the background job queue and make sure no FAIL for any IOR run
+        while not self.out_queue.empty():
+            if self.out_queue.get() == "FAIL":
+                self.fail("One of the Background IOR job failed")
+
+    #@skipForTicket("DAOS-4846")
     def test_enospace_lazy_aggrgation(self):
         """Jira ID: DAOS-4756.
 
@@ -136,7 +223,6 @@ class NvmeEnospace(ServerFillUp):
         :avocado: tags=all,hw,medium,nvme,ib2,full_regression,der_enospace
         :avocado: tags=enospc_lazy
         """
-        self.create_pool_max_size()
         print(self.pool.pool_percentage_used())
 
         #Run IOR to fill the pool.
@@ -160,7 +246,6 @@ class NvmeEnospace(ServerFillUp):
         :avocado: tags=all,hw,medium,nvme,ib2,full_regression,der_enospace
         :avocado: tags=enospc_time
         """
-        self.create_pool_max_size()
         print(self.pool.pool_percentage_used())
 
         # Enabled TIme mode for Aggregation.
@@ -190,8 +275,6 @@ class NvmeEnospace(ServerFillUp):
         # pylint: disable=attribute-defined-outside-init
         # pylint: disable=too-many-branches
         expected_err_count = 0
-        self.daos_cmd = DaosCommand(self.bin)
-        self.create_pool_max_size()
         print(self.pool.pool_percentage_used())
 
         # Disable the aggregation
