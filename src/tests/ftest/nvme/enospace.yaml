@@ -3,8 +3,9 @@ hosts:
     - server-A
     - server-B
   test_clients:
-    - client-A
-timeout: 900
+    - client-C
+    - client-D
+timeout: 2500
 server_config:
   servers_per_host: 2
   name: daos_server
@@ -40,7 +41,7 @@ container:
 ior:
   api: "DAOS"
   client_processes:
-    np: 16
+    np: 32
   daos_destroy: False
   iorflags:
       flags: "-w -F -k -G 1"
@@ -51,5 +52,5 @@ ior:
     16M:
       transfer_size: 2048 #2K
   objectclass:
-    SX:
-      obj_class: "SX"
+    S1:
+      obj_class: "S1"
