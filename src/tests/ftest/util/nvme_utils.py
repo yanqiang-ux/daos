@@ -30,6 +30,7 @@ from general_utils import run_task
 from command_utils_base import CommandFailure
 from ior_test_base import IorTestBase
 from test_utils_pool import TestPool
+from ior_utils import IorCommand
 
 try:
     # python 3.x
@@ -88,6 +89,7 @@ class ServerFillUp(IorTestBase):
         self.set_faulty_device = False
         self.scm_fill = False
         self.nvme_fill = False
+        self.ior_matrix = None
 
     def setUp(self):
         """Set up each test case."""
@@ -99,6 +101,7 @@ class ServerFillUp(IorTestBase):
         self.ior_read_flags = self.params.get("read_flags",
                                               '/run/ior/iorflags/*',
                                               '-r -R -k -G 1')
+        self.ior_default_flags = self.ior_cmd.flags.value
         #Get the number of daos_io_servers
         self.daos_io_servers = (self.server_managers[0].manager
                                 .job.yaml.server_params)
@@ -284,6 +287,7 @@ class ServerFillUp(IorTestBase):
                              set.
         """
         _create_cont = True
+        self.ior_cmd.flags.value = self.ior_default_flags
         #For IOR Read only operation, retrieve the stored container UUID
         if 'Read' in operation:
             _create_cont = False
@@ -295,7 +299,8 @@ class ServerFillUp(IorTestBase):
 
         # run IOR Command
         try:
-            self.run_ior_with_pool(create_cont=_create_cont)
+            out = self.run_ior_with_pool(create_cont=_create_cont)
+            self.ior_matrix = IorCommand.get_ior_metrics(out)
             results.put("PASS")
         except CommandFailure as _error:
             results.put("FAIL")

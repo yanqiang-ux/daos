@@ -29,10 +29,10 @@ from nvme_utils import ServerFillUp
 from avocado.core.exceptions import TestFail
 from general_utils import get_log_file, run_task
 from daos_utils import DaosCommand
-from apricot import skipForTicket
+#from apricot import skipForTicket
 from mpio_utils import MpioUtils
 from job_manager_utils import Mpirun
-from ior_utils import IorCommand
+from ior_utils import IorCommand, IorMetrics
 from command_utils_base import CommandFailure
 
 try:
@@ -57,7 +57,7 @@ class NvmeEnospace(ServerFillUp):
     def setUp(self):
         super(NvmeEnospace, self).setUp()
 
-        # initialize daos_cmd
+        # initialize daos command
         self.daos_cmd = DaosCommand(self.bin)
         self.create_pool_max_size()
         self.der_nospace_count = 0
@@ -68,6 +68,7 @@ class NvmeEnospace(ServerFillUp):
         Function to count the DER_NOSPACE and other ERR in client log.
         """
         #Get the Client side Error from client_log file.
+        output = []
         cmd = 'cat {} | grep ERR'.format(get_log_file(self.client_log))
         task = run_task(self.hostlist_clients, cmd)
         for buf, _nodes in task.iter_buffers():
@@ -82,7 +83,7 @@ class NvmeEnospace(ServerFillUp):
     def verify_enspace_log(self, der_nospace_err_count):
         """
         Function to verify there are no other error except DER_NOSPACE
-        in client log and also DER_NOSPACE count is expected.
+        in client log and also DER_NOSPACE count is higher.
 
         args:
             expected_err_count(int): Expected DER_NOSPACE count from client log.
@@ -94,7 +95,7 @@ class NvmeEnospace(ServerFillUp):
         if self.other_errors_count > 0:
             self.fail('Found other errors, count {} in client log {}'
                       .format(self.other_errors_count, self.client_log))
-        #Check the DER_NOSPACE error in log file
+        #Check the DER_NOSPACE error count is higher if not test will FAIL
         if self.der_nospace_count < der_nospace_err_count:
             self.fail('Expected DER_NOSPACE should be > {} and Found {}'
                       .format(der_nospace_err_count, self.der_nospace_count))
@@ -111,7 +112,7 @@ class NvmeEnospace(ServerFillUp):
         if mpio_util.mpich_installed(self.hostlist_clients) is False:
             self.fail("Exiting Test: Mpich not installed")
 
-        # Define the arguments for the ior_runner_thread method
+        # Define the IOR Command and use the parameter from yaml file.
         ior_bg_cmd = IorCommand()
         ior_bg_cmd.get_params(self)
         ior_bg_cmd.set_daos_params(self.server_group, self.pool)
@@ -134,7 +135,9 @@ class NvmeEnospace(ServerFillUp):
             manager.run()
         except (CommandFailure, TestFail) as _error:
             results.put("FAIL")
+            return
 
+        # run IOR Read Command in loop
         ior_bg_cmd.flags.update(self.ior_read_flags)
         while True:
             try:
@@ -148,19 +151,19 @@ class NvmeEnospace(ServerFillUp):
         Function to run test and validate DER_ENOSPACE and expected storage
         size.
         """
-        #Fill 75% of SCM pool, Aggregation is Enabled so one point of time, data
-        #will be aggregated and moved from SCM to NVMe.
-
         #Get the initial DER_ENOSPACE count
         self.der_enspace_log_count()
 
-        # Create the IOR Background thread
+        # Start the IOR Background thread which will write small data set and
+        # read in loop, until storage space is full.
         out_queue = queue.Queue()
         job = threading.Thread(target=self.ior_bg_thread,
                                kwargs={"results": out_queue})
         job.daemon = True
         job.start()
 
+        #Fill 75% of SCM pool, Aggregation is Enabled so one point of time, data
+        #will be aggregated and moved from SCM to NVMe.
         print('Starting main IOR load')
         self.start_ior_load(storage='SCM', precent=75)
         print(self.pool.pool_percentage_used())
@@ -170,27 +173,31 @@ class NvmeEnospace(ServerFillUp):
         self.start_ior_load(storage='SCM', precent=75)
         print(self.pool.pool_percentage_used())
 
-        #Fill 60% more of SCM pool, So now NVMe is Full so data will not be
-        #moved to NVMe but it will fill the SCM.
+        #Fill 60% more of SCM pool, now NVMe will be Full so data will not be
+        #moved to NVMe but it will start filling SCM. SCM size will be going to
+        #full and this command expected to fail with DER_NOSPACE
         try:
-            #Fill 60% more to SCM ,which should Fail because no SCM space
             self.start_ior_load(storage='SCM', precent=60)
-            self.fail('This test suppose to because of DER_NOSPACE'
+            self.fail('This test suppose to FAIL because of DER_NOSPACE'
                       'but it got Passed')
         except TestFail as _error:
             self.log.info('Test expected to fail because of DER_NOSPACE')
+
+        #Display the pool%
+        print(self.pool.pool_percentage_used())
 
         #verify the DER_NO_SAPCE error count is expected and no other Error in
         #client log
         self.verify_enspace_log(self.der_nospace_count)
 
-        #Check that both NVMe and SCM are full.
+        #Check both NVMe and SCM are full.
         pool_usage = self.pool.pool_percentage_used()
+        #NVM should be 99% full if not test will fail.
         if pool_usage['nvme'] > 1:
             self.fail('Pool NVMe used percentage should be < 1%, instead {}'.
                       format(pool_usage['nvme']))
-        #Some % used for system space so it wont be fully used by data
-        if pool_usage['scm'] > 20:
+        #For SCM some % space used for system so it wont be 100% full.
+        if pool_usage['scm'] > 25:
             self.fail('Pool SCM used percentage should be < 20%, instead {}'.
                       format(pool_usage['scm']))
 
@@ -199,14 +206,14 @@ class NvmeEnospace(ServerFillUp):
             if self.out_queue.get() == "FAIL":
                 self.fail("One of the Background IOR job failed")
 
-    @skipForTicket("DAOS-4846")
+    #@skipForTicket("DAOS-4846")
     def test_enospace_lazy_aggrgation(self):
         """Jira ID: DAOS-4756.
 
         Test Description: IO gets DER_NOSPACE when SCM and NVMe is full with
                           default (lazy) Aggregation mode.
 
-        Use Case: This tests will create the pool. Fill 75% of SCM size which
+        Use Case: This tests will create the pool and fill 75% of SCM size which
                   will trigger the aggregation because of space pressure,
                   next fill 75% more which should fill NVMe. Try to fill 60%
                   more and now SCM size will be full too.
@@ -221,7 +228,7 @@ class NvmeEnospace(ServerFillUp):
         #Run IOR to fill the pool.
         self.run_enospace()
 
-    @skipForTicket("DAOS-4846")
+    #@skipForTicket("DAOS-4846")
     def test_enospace_time_aggrgation(self):
         """Jira ID: DAOS-4756.
 
@@ -231,10 +238,10 @@ class NvmeEnospace(ServerFillUp):
 
         Use Case: This tests will create the pool. Set Aggregation mode to Time.
                   Fill 75% of SCM size which will trigger the aggregation
-                  because based on time, next fill 75% more which should fill
-                  NVMe. Try to fill 60% more and now SCM size will be full too.
-                  verify that last IO fails with DER_NOSPACE and SCM/NVMe pool
-                  capacity is full.
+                  because mode set to time, next fill 75% more which will fill
+                  up NVMe. Try to fill 60% more and now SCM size will be full
+                  too. Verify last IO fails with DER_NOSPACE and SCM/NVMe
+                  pool capacity is full.
 
         :avocado: tags=all,hw,medium,nvme,ib2,full_regression,der_enospace
         :avocado: tags=enospc_time
@@ -247,7 +254,49 @@ class NvmeEnospace(ServerFillUp):
         #Run IOR to fill the pool.
         self.run_enospace()
 
-    @skipForTicket("DAOS-4846")
+    #@skipForTicket("DAOS-4846")
+    #@skipForTicket("DAOS-5430")
+    def test_performance_storage_full(self):
+        """Jira ID: DAOS-4756.
+
+        Test Description: Verify IO Read performance when pool size is full.
+
+        Use Case: This tests will create the pool. Run small set of IOR as
+                  baseline.Start IOR with < 4K which will start filling SCM
+                  and trigger aggregation and start fill up NVMe.
+                  Check the IOR baseline read number and make sure it's close
+                  to the number ran prior system storage was full.
+
+        :avocado: tags=all,hw,medium,nvme,ib2,full_regression,der_enospace
+        :avocado: tags=enospc_performance
+        """
+        #Write the IOR Baseline and get the Read BW for later comparison.
+        print(self.pool.pool_percentage_used())
+        #Write First
+        self.start_ior_load(storage='SCM', precent=1)
+        #Read the baseline data set
+        self.start_ior_load(storage='SCM', operation='Read', precent=1)
+        max_mib_baseline = float(self.ior_matrix[0][int(IorMetrics.Max_MiB)])
+        baseline_cont_uuid = self.ior_cmd.daos_cont.value
+        print("IOR Baseline Read MiB {}".format(max_mib_baseline))
+
+        #Run IOR to fill the pool.
+        self.run_enospace()
+
+        #Read the same container which was written at the beginning.
+        self.ior_cmd.daos_cont.value = baseline_cont_uuid
+        self.start_ior_load(storage='SCM', operation='Read', precent=1)
+        max_mib_latest = float(self.ior_matrix[0][int(IorMetrics.Max_MiB)])
+        print("IOR Latest Read MiB {}".format(max_mib_latest))
+
+        #Check if latest IOR read performance is in Tolerance of 5%, when
+        #Storage space is full.
+        if abs(max_mib_baseline-max_mib_latest) > (max_mib_baseline/100 * 5):
+            self.fail('Latest IOR read performance is not under 5% Tolerance'
+                      ' Baseline Read MiB = {} and latest IOR Read MiB = {}'
+                      .format(max_mib_latest, max_mib_baseline))
+
+    #@skipForTicket("DAOS-4846")
     def test_enospace_no_aggrgation(self):
         """Jira ID: DAOS-4756.
 
@@ -290,7 +339,7 @@ class NvmeEnospace(ServerFillUp):
             except TestFail as _error:
                 self.log.info('Expected to fail because of DER_NOSPACE')
 
-            #verify the DER_NO_SAPCE error count is expected and no other Error
+            #Verify DER_NO_SAPCE error count is expected and no other Error
             #in client log.
             self.verify_enspace_log(self.der_nospace_count)
 
@@ -307,7 +356,7 @@ class NvmeEnospace(ServerFillUp):
             #Delay to release the SCM size.
             time.sleep(60)
             print(pool_usage)
-            #SCM pool size should be released (some still be used for metadata)
+            #SCM pool size should be released (some still be used for system)
             #Pool SCM free % should not be less than 95%
             if pool_usage['scm'] < 95:
                 self.fail('SCM pool used percentage should be < 95, instead {}'.
