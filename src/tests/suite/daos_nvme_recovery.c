@@ -32,6 +32,9 @@
 #include "daos_test.h"
 #include "daos_iotest.h"
 
+#define IO_SIZE_NVME	(5ULL << 10) /* all records  >= 4K */
+#define	IO_SIZE_SCM	64
+
 static void
 set_fail_loc(test_arg_t *arg, d_rank_t rank, uint64_t fail_loc)
 {
@@ -119,9 +122,42 @@ nvme_recov_1(void **state)
 	print_message("Done\n");
 }
 
+/* Verify device states when NVMe set to faulty*/
+static void
+nvme_recov_2(void **state)
+{
+	test_arg_t			*arg = *state;
+	daos_obj_id_t		oid;
+	daos_pool_info_t	pinfo;
+	int					rc;
+
+	/**
+	*Get the pool storage information
+	*/
+	rc = pool_storage_info(state, &pinfo);
+	assert_int_equal(rc, 0);
+
+	oid = dts_oid_gen(dts_obj_class, 0, arg->myrank);
+	print_message("nvme_recov_2...\n");
+	print_message("DAOS_IOD_ARRAY:NVMe\n");
+	io_simple_internal(state, oid, IO_SIZE_NVME, DAOS_IOD_ARRAY,
+			   "io_simple_nvme_array dkey",
+			   "io_simple_nvme_array akey");
+	dmg_storage_device_list(dmg_config_file);
+	/**
+	*Get the pool storage information
+	*/
+	rc = pool_storage_info(state, &pinfo);
+	assert_int_equal(rc, 0);
+
+}
+
+
 static const struct CMUnitTest nvme_recov_tests[] = {
 	{"NVMe Recovery 1: Online faulty reaction",
 	 nvme_recov_1, NULL, test_case_teardown},
+	{"NVMe Recovery 2: Verify device states after NVMe set to Faulty",
+	 nvme_recov_2, NULL, test_case_teardown},
 };
 
 static int

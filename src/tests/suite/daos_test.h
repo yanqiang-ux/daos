@@ -382,6 +382,11 @@ int rebuild_sub_setup(void **state);
 int rebuild_sub_teardown(void **state);
 int rebuild_small_sub_setup(void **state);
 
+void io_simple_internal(void **state, daos_obj_id_t oid, unsigned int size,
+	daos_iod_type_t iod_type, const char dkey[],
+	const char akey[]);
+int pool_storage_info(void **state, daos_pool_info_t *pinfo);
+
 static inline void
 daos_test_print(int rank, char *message)
 {

@@ -571,3 +571,78 @@ out_json:
 
 	return rc;
 }
+
+int
+dmg_storage_device_list(const char *dmg_config_file)
+{
+	struct json_object	*dmg_out = NULL;
+	struct json_object	*device_list = NULL;
+	struct json_object	*hosts_list = NULL;
+	struct json_object	*val2 = NULL;
+	struct json_object	*tmp = NULL;
+	struct json_object	*tmp1 = NULL;
+	struct json_object	*id = NULL;
+	int			i, rc = 0;
+	int device_length = 0;
+
+	rc = daos_dmg_json_pipe("storage query list-devices", dmg_config_file,
+				NULL, 0, &dmg_out);
+	if (rc != 0) {
+		D_ERROR("dmg failed");
+		goto out_json;
+	}
+
+	if (!json_object_object_get_ex(dmg_out, "host_storage_map",
+		&device_list)) {
+		D_ERROR("unable to extract host_storage_map from JSON\n");
+		return -DER_INVAL;
+	}
+
+	json_object_object_foreach(device_list, key, val) {
+		D_DEBUG(DB_TEST, "key:\"%s\",val=%s\n", key,
+			json_object_to_json_string(val));
+
+		if (!json_object_object_get_ex(val, "hosts", &hosts_list)) {
+			D_ERROR("unable to extract hosts from JSON\n");
+			return -DER_INVAL;
+		}
+		printf("hosts=%s\n", json_object_to_json_string(hosts_list));
+		json_object_object_foreach(val, key1, val1) {
+			D_DEBUG(DB_TEST, "key1:\"%s\",val1=%s\n", key1,
+				json_object_to_json_string(val1));
+
+			json_object_object_get_ex(val1, "smd_info", &val2);
+			if (val2 != NULL) {
+				if (!json_object_object_get_ex(val2, "devices", &tmp)) {
+					D_ERROR("unable to extract devices from JSON\n");
+					return -DER_INVAL;
+				}
+				device_length = json_object_array_length(tmp);
+				for (i = 0; i < device_length; i++) {
+					id = json_object_array_get_idx(tmp, i);
+					if (!json_object_object_get_ex(id, "uuid", &tmp1)) {
+						D_ERROR("unable to extract uuid from JSON\n");
+						return -DER_INVAL;
+					}
+					printf("\n UUID=%s ", json_object_to_json_string(tmp1));
+					if (!json_object_object_get_ex(id, "state", &tmp1)) {
+						D_ERROR("unable to extract state from JSON\n");
+						return -DER_INVAL;
+					}
+					printf("state=%s ", json_object_to_json_string(tmp1));
+					if (!json_object_object_get_ex(id, "rank", &tmp1)) {
+						D_ERROR("unable to extract rank from JSON\n");
+						return -DER_INVAL;
+					}
+					printf("rank=%s \n", json_object_to_json_string(tmp1));
+				}
+			}
+		}
+	}
+
+out_json:
+	if (dmg_out != NULL)
+		json_object_put(dmg_out);
+
+	return rc;
+}
