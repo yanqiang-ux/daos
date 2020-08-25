@@ -303,4 +303,6 @@ int dmg_pool_create(const char *dmg_config_file,
 int dmg_pool_destroy(const char *dmg_config_file,
 		     const uuid_t uuid, const char *grp, int force);
 
+int dmg_storage_device_list(const char *dmg_config_file);
+
 #endif /* __DAOS_TESTS_LIB_H__ */
